@@ -446,7 +446,7 @@ const NewOrderScreen = ({onStart}) => {
 };
 
 // ── Menu Builder ──────────────────────────────────────────────────
-const MenuScreen = ({menuItems,orderType,tableRef,onSend,onBack,existingItems=[],editMode=false,desktop=false}) => {
+const MenuScreen = ({menuItems,orderType,tableRef,onSend,onBack,existingItems=[],editMode=false,addMode=false,desktop=false}) => {
   const initCart=()=>{const c={};existingItems.forEach(i=>{c[i.menu_item_id||i.id]=i.quantity;});return c;};
   const initNotes=()=>{const n={};existingItems.forEach(i=>{if(i.note)n[i.menu_item_id||i.id]=i.note;});return n;};
   const [cart,setCart]=useState(initCart);
@@ -492,11 +492,11 @@ const MenuScreen = ({menuItems,orderType,tableRef,onSend,onBack,existingItems=[]
         desktop
           ? <div className="cbar-desktop" onClick={send} style={{cursor:sending?"wait":"pointer"}}>
               <div><div className="cbl">{itemCount} item{itemCount!==1?"s":""}</div><div className="cbt">€{total.toFixed(2)}</div></div>
-              <div className="cbb">{sending?"Saving…":(editMode?"Save Changes →":"Send to Kitchen →")}</div>
+              <div className="cbb">{sending?"Saving…":(addMode?"Add to Order →":editMode?"Save Changes →":"Send to Kitchen →")}</div>
             </div>
           : <div className="cbar" onClick={send} style={{cursor:sending?"wait":"pointer"}}>
               <div><div className="cbl">{itemCount} item{itemCount!==1?"s":""}</div><div className="cbt">€{total.toFixed(2)}</div></div>
-              <div className="cbb">{sending?"Saving…":(editMode?"Save Changes →":"Send to Kitchen →")}</div>
+              <div className="cbb">{sending?"Saving…":(addMode?"Add to Order →":editMode?"Save Changes →":"Send to Kitchen →")}</div>
             </div>
       )}
       {noteItem&&(
@@ -625,7 +625,7 @@ const OrdersPanel = ({orders,onSelect,desktop=false}) => {
 };
 
 // ── Order Detail ──────────────────────────────────────────────────
-const OrderDetailScreen = ({order,orderItems,isAdmin,onBack,onPay,onEdit,onDelete,desktop=false}) => {
+const OrderDetailScreen = ({order,orderItems,isAdmin,onBack,onPay,onEdit,onDelete,onAddItems,desktop=false}) => {
   const [confirmDel,setConfirmDel]=useState(false);
   const items=orderItems.filter(i=>i.order_id===order.id);
   const wrap = desktop ? "desktop-panel" : "pg";
@@ -655,7 +655,12 @@ const OrderDetailScreen = ({order,orderItems,isAdmin,onBack,onPay,onEdit,onDelet
       </div>
       <div className="action-bar">
         {order.status==="ready"&&<button className="btn bg2 bsm" style={{flex:1}} onClick={()=>onPay(order)}>💳 Collect Payment</button>}
-        {order.status!=="paid"&&order.status!=="ready"&&<button className="btn bo bsm" style={{flex:1}} onClick={()=>onEdit(order)}><Ic.Edit/> Edit Order</button>}
+        {order.status!=="paid"&&order.status!=="ready"&&(
+          <>
+            <button className="btn bp bsm" style={{flex:1}} onClick={()=>onAddItems(order)}>+ Add Items</button>
+            <button className="btn bo bsm" style={{flex:1}} onClick={()=>onEdit(order)}><Ic.Edit/> Edit</button>
+          </>
+        )}
         {isAdmin&&<button className="btn bd bsm" onClick={()=>setConfirmDel(true)}><Ic.Trash/></button>}
       </div>
       {confirmDel&&<Confirm title="Delete Order" msg={`Delete order for ${orderLabel(order)}? Cannot be undone.`} danger onOk={()=>{onDelete(order.id);setConfirmDel(false);}} onCancel={()=>setConfirmDel(false)}/>}
@@ -783,6 +788,7 @@ export default function App() {
   const [selectedOrder,setSelectedOrder] = useState(null);
   const [payOrder,setPayOrder]       = useState(null);
   const [editOrder,setEditOrder]     = useState(null);
+  const [addItemsOrder,setAddItemsOrder] = useState(null);
   const [isAdmin,setIsAdmin]         = useState(false);
   const [isDesktop,setIsDesktop]     = useState(window.innerWidth>=768);
 
@@ -857,7 +863,28 @@ export default function App() {
   const seedMenu=async()=>{ setSeeding(true); try{await dbPost("menu_items",DEFAULT_MENU);await load();showToast("✓ Menu loaded!");}catch(e){showToast("Seed failed");} setSeeding(false); };
   const createOrder=async(cartItems,total)=>{ try{ const[order]=await dbPost("orders",{type:orderCtx.type,table_number:orderCtx.ref||null,status:"not-started",total}); await dbPost("order_items",cartItems.map(i=>({order_id:order.id,item_name:i.name,category:i.category,quantity:i.quantity,price:Number(i.price),note:i.note||null}))); await load();showToast("✓ Sent to kitchen!");setScreen(null);setTab("kitchen"); }catch(e){showToast("Failed to send order");} };
   const updateOrder=async(cartItems,total)=>{ try{ await dbDelete(`order_items?order_id=eq.${editOrder.id}`); await dbPost("order_items",cartItems.map(i=>({order_id:editOrder.id,item_name:i.name,category:i.category,quantity:i.quantity,price:Number(i.price),note:i.note||null}))); await dbPatch(`orders?id=eq.${editOrder.id}`,{total}); await load();showToast("✓ Order updated!");setScreen(null);setEditOrder(null);setSelectedOrder(null);setTab("orders"); }catch(e){showToast("Failed to update");} };
-  const deleteOrder=async id=>{ try{ await dbDelete(`order_items?order_id=eq.${id}`);await dbDelete(`payments?order_id=eq.${id}`);await dbDelete(`orders?id=eq.${id}`); await load();showToast("✓ Order deleted");setSelectedOrder(null);setScreen(null); }catch(e){showToast("Delete failed");} };
+  const addItemsToOrder = async (cartItems, _total) => {
+    try {
+      // Append new items to existing order_items
+      await dbPost("order_items", cartItems.map(i=>({
+        order_id: addItemsOrder.id,
+        item_name: i.name,
+        category: i.category,
+        quantity: i.quantity,
+        price: Number(i.price),
+        note: i.note||null,
+      })));
+      // Recalculate total from all items
+      const existing = orderItems.filter(i=>i.order_id===addItemsOrder.id);
+      const existingTotal = existing.reduce((s,i)=>s+Number(i.price)*i.quantity,0);
+      const newTotal = existingTotal + cartItems.reduce((s,i)=>s+Number(i.price)*i.quantity,0);
+      await dbPatch(`orders?id=eq.${addItemsOrder.id}`,{total: newTotal});
+      await load();
+      showToast("✓ Items added!");
+      setScreen("order-detail");
+      setAddItemsOrder(null);
+    } catch(e) { showToast("Failed to add items"); }
+  };{ try{ await dbDelete(`order_items?order_id=eq.${id}`);await dbDelete(`payments?order_id=eq.${id}`);await dbDelete(`orders?id=eq.${id}`); await load();showToast("✓ Order deleted");setSelectedOrder(null);setScreen(null); }catch(e){showToast("Delete failed");} };
   const advanceStage=async(id,next)=>{ try{await dbPatch(`orders?id=eq.${id}`,{status:next});await load();showToast(`✓ ${STAGE_LABEL[next]}`);}catch(e){showToast("Error");} };
   const confirmPayment=async(order,method)=>{ try{ await dbPatch(`orders?id=eq.${order.id}`,{status:"paid"});await dbPost("payments",{order_id:order.id,method,amount:Number(order.total)}); await load();showToast("✓ Payment confirmed");setScreen(null);setPayOrder(null);setSelectedOrder(null);setTab("orders"); }catch(e){showToast("Payment failed");} };
   const updateMenuItem=async(id,fields)=>{ try{await dbPatch(`menu_items?id=eq.${id}`,fields);await load();}catch(e){showToast("Save failed");} };
@@ -874,7 +901,7 @@ export default function App() {
   // ── Shared logic for screens ──────────────────────────────────
   const handleSelectOrder = o => { setSelectedOrder(o); setScreen("order-detail"); };
   const handlePay = o => { setPayOrder(o); setScreen("payment"); };
-  const handleEdit = o => { setEditOrder(o); setScreen("edit-order"); };
+  const handleAddItems = o => { setAddItemsOrder(o); setScreen("add-items"); };
 
   // ── Desktop Layout ────────────────────────────────────────────
   if(isDesktop) {
@@ -884,8 +911,9 @@ export default function App() {
       if(screen==="reports")     return <ReportsScreen orders={orders} orderItems={orderItems} payments={payments} onLock={()=>setScreen(null)} desktop/>;
       if(screen==="admin")       return <AdminScreen menuItems={menuItems} onUpdate={updateMenuItem} onLock={()=>{setScreen(null);setIsAdmin(false);}} desktop/>;
       if(screen==="menu")        return <MenuScreen menuItems={menuItems} orderType={orderCtx?.type} tableRef={orderCtx?.ref} onSend={createOrder} onBack={()=>setScreen(null)} desktop/>;
+      if(screen==="add-items"&&addItemsOrder) return <MenuScreen menuItems={menuItems} orderType={addItemsOrder?.type} tableRef={addItemsOrder?.table_number} onSend={addItemsToOrder} onBack={()=>{setScreen("order-detail");setAddItemsOrder(null);}} editMode desktop addMode/>;
       if(screen==="edit-order")  return <MenuScreen menuItems={menuItems} orderType={editOrder?.type} tableRef={editOrder?.table_number} existingItems={orderItems.filter(i=>i.order_id===editOrder?.id).map(i=>({...i,menu_item_id:menuItems.find(m=>m.name===i.item_name)?.id}))} onSend={updateOrder} onBack={()=>{setScreen(null);setEditOrder(null);}} editMode desktop/>;
-      if(screen==="order-detail"&&selectedOrder) return <OrderDetailScreen order={selectedOrder} orderItems={orderItems} isAdmin={isAdmin} onBack={()=>{setScreen(null);setSelectedOrder(null);}} onPay={handlePay} onEdit={handleEdit} onDelete={deleteOrder} desktop/>;
+      if(screen==="order-detail"&&selectedOrder) return <OrderDetailScreen order={selectedOrder} orderItems={orderItems} isAdmin={isAdmin} onBack={()=>{setScreen(null);setSelectedOrder(null);}} onPay={handlePay} onEdit={handleEdit} onDelete={deleteOrder} onAddItems={handleAddItems} desktop/>;
       if(screen==="payment"&&payOrder) return <PaymentScreen order={payOrder} orderItems={orderItems} onConfirm={confirmPayment} onBack={()=>{setScreen("order-detail");setPayOrder(null);}} desktop/>;
 
       if(tab==="new") return !menuReady ? <SetupScreen onSeed={seedMenu} seeding={seeding}/> : <NewOrderScreen onStart={(type,ref)=>{setOrderCtx({type,ref});setScreen("menu");}}/>;
@@ -967,7 +995,8 @@ export default function App() {
   if(screen==="admin")       return <div className="mobile-shell"><style>{S}</style><MobileHeader sub="Menu Admin"/><AdminScreen menuItems={menuItems} onUpdate={updateMenuItem} onLock={()=>{setScreen(null);setIsAdmin(false);}}/><Toast msg={toast}/></div>;
   if(screen==="menu")        return <div className="mobile-shell"><style>{S}</style><MobileHeader sub={orderCtx?.type==="dine-in"?`Table ${orderCtx?.ref}`:"Takeaway"}/><MenuScreen menuItems={menuItems} orderType={orderCtx?.type} tableRef={orderCtx?.ref} onSend={createOrder} onBack={()=>setScreen(null)}/><Toast msg={toast}/></div>;
   if(screen==="edit-order")  return <div className="mobile-shell"><style>{S}</style><MobileHeader sub="Edit Order"/><MenuScreen menuItems={menuItems} orderType={editOrder?.type} tableRef={editOrder?.table_number} existingItems={orderItems.filter(i=>i.order_id===editOrder?.id).map(i=>({...i,menu_item_id:menuItems.find(m=>m.name===i.item_name)?.id}))} onSend={updateOrder} onBack={()=>{setScreen(null);setEditOrder(null);}} editMode/><Toast msg={toast}/></div>;
-  if(screen==="order-detail"&&selectedOrder) return <div className="mobile-shell"><style>{S}</style><MobileHeader sub="Order Detail"/><OrderDetailScreen order={selectedOrder} orderItems={orderItems} isAdmin={isAdmin} onBack={()=>{setScreen(null);setSelectedOrder(null);}} onPay={handlePay} onEdit={handleEdit} onDelete={deleteOrder}/><Toast msg={toast}/></div>;
+  if(screen==="add-items"&&addItemsOrder) return <div className="mobile-shell"><style>{S}</style><MobileHeader sub={`Add to ${orderLabel(addItemsOrder)}`}/><MenuScreen menuItems={menuItems} orderType={addItemsOrder?.type} tableRef={addItemsOrder?.table_number} onSend={addItemsToOrder} onBack={()=>{setScreen("order-detail");setAddItemsOrder(null);}} addMode/><Toast msg={toast}/></div>;
+  if(screen==="order-detail"&&selectedOrder) return <div className="mobile-shell"><style>{S}</style><MobileHeader sub="Order Detail"/><OrderDetailScreen order={selectedOrder} orderItems={orderItems} isAdmin={isAdmin} onBack={()=>{setScreen(null);setSelectedOrder(null);}} onPay={handlePay} onEdit={handleEdit} onDelete={deleteOrder} onAddItems={handleAddItems}/><Toast msg={toast}/></div>;
   if(screen==="payment"&&payOrder) return <div className="mobile-shell"><style>{S}</style><MobileHeader sub="Payment"/><PaymentScreen order={payOrder} orderItems={orderItems} onConfirm={confirmPayment} onBack={()=>{setScreen("order-detail");setPayOrder(null);}}/><Toast msg={toast}/></div>;
 
   return (
