@@ -104,8 +104,8 @@ const timeAgo = ts => { const s=Math.floor((Date.now()-new Date(ts))/1000); if(s
 const getStartOf = p => { const d=new Date(); if(p==="today"){d.setHours(0,0,0,0);return d;} if(p==="week"){d.setDate(d.getDate()-7);d.setHours(0,0,0,0);return d;} if(p==="month"){d.setMonth(d.getMonth()-1);d.setHours(0,0,0,0);return d;} d.setFullYear(d.getFullYear()-1);d.setHours(0,0,0,0);return d; };
 const orderLabel = o => o.type==="dine-in" ? `Table ${o.table_number}` : o.table_number||"Takeaway";
 
-const requestNotifPermission = async () => { if(!("Notification" in window)) return false; if(Notification.permission==="granted") return true; return (await Notification.requestPermission())==="granted"; };
-const sendNotif = (title,body) => { if(Notification?.permission==="granted") new Notification(title,{body}); };
+const requestNotifPermission = async () => { try { if(!("Notification" in window)) return false; if(Notification.permission==="granted") return true; return (await Notification.requestPermission())==="granted"; } catch(e) { return false; } };
+const sendNotif = (title,body) => { try { if(typeof Notification !== "undefined" && Notification.permission==="granted") new Notification(title,{body}); } catch(e) {} };
 
 // ── Logo ──────────────────────────────────────────────────────────
 const ObaladeLogo = ({size=44}) => (
@@ -414,7 +414,7 @@ const MenuScreen = ({menuItems, orderType, tableRef, onSend, onBack, existingIte
 // ── Kitchen Screen ─────────────────────────────────────────────────
 const KitchenScreen = ({orders, orderItems, onAdvance, onRefresh}) => {
   const active = orders.filter(o=>o.status!=="paid").sort((a,b)=>new Date(a.created_at)-new Date(b.created_at));
-  const [notifEnabled,setNotifEnabled]=useState(Notification?.permission==="granted");
+  const [notifEnabled,setNotifEnabled]=useState(typeof Notification !== "undefined" && Notification.permission==="granted");
   const enableNotifs=async()=>{const ok=await requestNotifPermission();setNotifEnabled(ok);};
 
   // Group by stage for visual ordering: not-started first, then busy, then ready
