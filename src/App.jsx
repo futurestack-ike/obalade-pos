@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from “react”;
+import { useState, useEffect, useCallback, useRef } from "react";
 
 const SUPABASE_URL = “https://srcmohssomlkngvdkyxp.supabase.co”;
 const SUPABASE_ANON = “eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNyY21vaHNzb21sa25ndmRreXhwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY5NTI4MTcsImV4cCI6MjA5MjUyODgxN30.kDrYINdJVzeMR3n6861mAcIbyG55EIygrs2b3_gCWf8”;
