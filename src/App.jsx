@@ -4,14 +4,11 @@ const SUPABASE_URL = "https://srcmohssomlkngvdkyxp.supabase.co";
 const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNyY21vaHNzb21sa25ndmRreXhwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY5NTI4MTcsImV4cCI6MjA5MjUyODgxN30.kDrYINdJVzeMR3n6861mAcIbyG55EIygrs2b3_gCWf8";
 const OWNER_PIN = "1234";
 const MENU_CATEGORIES = ["Suya","Main","Soup","Fried","Standalone","Beans","Sides","Kids","Drinks"];
-
-// Kitchen stages
-const STAGES = ["not-started", "busy", "ready"];
-const STAGE_LABEL  = { "not-started": "Not Started", "busy": "Busy", "ready": "Ready" };
-const STAGE_NEXT   = { "not-started": "busy", "busy": "ready" };
-const STAGE_BTN    = { "not-started": "Start Cooking →", "busy": "Mark Ready ✓" };
-const STAGE_COLOR  = { "not-started": "#c0392b", "busy": "#c9922a", "ready": "#1a6b3c" };
-const STAGE_BG     = { "not-started": "#fdecea",  "busy": "#fff8e6",  "ready": "#eaf5ef" };
+const STAGE_LABEL = { "not-started": "Not Started", "busy": "Busy", "ready": "Ready" };
+const STAGE_NEXT  = { "not-started": "busy", "busy": "ready" };
+const STAGE_BTN   = { "not-started": "Start Cooking →", "busy": "Mark Ready ✓" };
+const STAGE_COLOR = { "not-started": "#c0392b", "busy": "#c9922a", "ready": "#1a6b3c" };
+const STAGE_BG    = { "not-started": "#fdecea", "busy": "#fff8e6", "ready": "#eaf5ef" };
 
 const DEFAULT_MENU = [
   { name: "Chicken Suya", category: "Suya", price: 0, available: true },
@@ -94,6 +91,30 @@ const DEFAULT_MENU = [
 
 // ── Supabase ──────────────────────────────────────────────────────
 const H = { apikey: SUPABASE_ANON, Authorization: `Bearer ${SUPABASE_ANON}`, "Content-Type": "application/json" };
+const authH = (token) => ({ apikey: SUPABASE_ANON, Authorization: `Bearer ${token}`, "Content-Type": "application/json" });
+
+const sbAuth = async (email, password) => {
+  const r = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=password`, {
+    method: "POST",
+    headers: { apikey: SUPABASE_ANON, "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.error_description || d.msg || "Login failed");
+  return d;
+};
+
+const sbRefresh = async (refresh_token) => {
+  const r = await fetch(`${SUPABASE_URL}/auth/v1/token?grant_type=refresh_token`, {
+    method: "POST",
+    headers: { apikey: SUPABASE_ANON, "Content-Type": "application/json" },
+    body: JSON.stringify({ refresh_token }),
+  });
+  const d = await r.json();
+  if (!r.ok) throw new Error("Session expired");
+  return d;
+};
+
 const dbGet    = async p => { const r=await fetch(`${SUPABASE_URL}/rest/v1/${p}`,{headers:H}); if(!r.ok) throw new Error(await r.text()); return r.json(); };
 const dbPost   = async (p,b) => { const r=await fetch(`${SUPABASE_URL}/rest/v1/${p}`,{method:"POST",headers:{...H,Prefer:"return=representation"},body:JSON.stringify(b)}); if(!r.ok) throw new Error(await r.text()); const t=await r.text(); return t?JSON.parse(t):null; };
 const dbPatch  = async (p,b) => { const r=await fetch(`${SUPABASE_URL}/rest/v1/${p}`,{method:"PATCH",headers:{...H,Prefer:"return=representation"},body:JSON.stringify(b)}); if(!r.ok) throw new Error(await r.text()); const t=await r.text(); return t?JSON.parse(t):null; };
@@ -104,13 +125,17 @@ const timeAgo = ts => { const s=Math.floor((Date.now()-new Date(ts))/1000); if(s
 const getStartOf = p => { const d=new Date(); if(p==="today"){d.setHours(0,0,0,0);return d;} if(p==="week"){d.setDate(d.getDate()-7);d.setHours(0,0,0,0);return d;} if(p==="month"){d.setMonth(d.getMonth()-1);d.setHours(0,0,0,0);return d;} d.setFullYear(d.getFullYear()-1);d.setHours(0,0,0,0);return d; };
 const orderLabel = o => o.type==="dine-in" ? `Table ${o.table_number}` : o.table_number||"Takeaway";
 
-const requestNotifPermission = async () => { try { if(!("Notification" in window)) return false; if(Notification.permission==="granted") return true; return (await Notification.requestPermission())==="granted"; } catch(e) { return false; } };
-const sendNotif = (title,body) => { try { if(typeof Notification !== "undefined" && Notification.permission==="granted") new Notification(title,{body}); } catch(e) {} };
+const safeNotif = {
+  supported: () => { try { return "Notification" in window; } catch(e) { return false; } },
+  permission: () => { try { return typeof Notification !== "undefined" ? Notification.permission : "denied"; } catch(e) { return "denied"; } },
+  request: async () => { try { if(!safeNotif.supported()) return false; if(safeNotif.permission()==="granted") return true; const p=await Notification.requestPermission(); return p==="granted"; } catch(e) { return false; } },
+  send: (title, body) => { try { if(safeNotif.permission()==="granted") new Notification(title,{body,icon:"/favicon.ico"}); } catch(e) {} },
+};
 
 // ── Logo ──────────────────────────────────────────────────────────
-const ObaladeLogo = ({size=44}) => (
+const ObaladeLogo = ({size=44, white=false}) => (
   <svg width={size} height={size} viewBox="0 0 110 110" fill="none">
-    <rect width="110" height="110" rx="12" fill="#1a6b3c"/>
+    <rect width="110" height="110" rx="12" fill={white?"rgba(255,255,255,0.15)":"#1a6b3c"}/>
     <rect x="8" y="50" width="94" height="7" rx="3.5" fill="#c9922a"/>
     <rect x="12" y="34" width="18" height="24" rx="5" fill="#f0c060"/>
     <rect x="36" y="30" width="18" height="28" rx="5" fill="#e8b84b"/>
@@ -126,20 +151,62 @@ const ObaladeLogo = ({size=44}) => (
 const S = `
 @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Inter:wght@400;500;600;700&display=swap');
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent;}
-:root{--g:#1a6b3c;--gl:#2d8a52;--gp:#eaf5ef;--gold:#c9922a;--red:#c0392b;--redf:#fdecea;--bg:#f4f2ed;--card:#fff;--text:#1a1a10;--muted:#8a8a7a;--border:#e4e0d8;--sh:0 2px 10px rgba(0,0,0,.06);--r:16px;--rS:10px;}
+:root{
+  --g:#1a6b3c;--gl:#2d8a52;--gp:#eaf5ef;--gd:#0f4024;
+  --gold:#c9922a;--red:#c0392b;--redf:#fdecea;
+  --bg:#f4f2ed;--card:#fff;--text:#1a1a10;--muted:#8a8a7a;
+  --border:#e4e0d8;--sh:0 2px 10px rgba(0,0,0,.06);
+  --r:16px;--rS:10px;
+  --sidebar:260px;
+}
 body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);}
-.app{display:flex;flex-direction:column;min-height:100vh;max-width:480px;margin:0 auto;}
+
+/* ── Layout ── */
+.app{display:flex;flex-direction:column;min-height:100vh;}
+
+/* Mobile */
+.mobile-shell{display:flex;flex-direction:column;min-height:100vh;max-width:480px;margin:0 auto;}
+
+/* Desktop shell */
+.desktop-shell{display:flex;height:100vh;overflow:hidden;}
+
+/* Sidebar */
+.sidebar{width:var(--sidebar);background:var(--g);display:flex;flex-direction:column;height:100vh;position:fixed;left:0;top:0;z-index:100;}
+.sidebar-logo{padding:24px 20px;border-bottom:1px solid rgba(255,255,255,.1);}
+.sidebar-logo-name{font-family:'Playfair Display',serif;font-weight:900;font-size:17px;color:#fff;margin-top:10px;line-height:1.2;}
+.sidebar-logo-sub{font-size:10px;color:rgba(255,255,255,.5);letter-spacing:.8px;text-transform:uppercase;margin-top:2px;}
+.sidebar-nav{flex:1;padding:16px 12px;}
+.snav-btn{width:100%;background:none;border:none;color:rgba(255,255,255,.7);font-family:'Inter',sans-serif;font-size:14px;font-weight:600;padding:12px 16px;border-radius:10px;cursor:pointer;display:flex;align-items:center;gap:12px;margin-bottom:4px;transition:all .15s;text-align:left;}
+.snav-btn:hover{background:rgba(255,255,255,.1);color:#fff;}
+.snav-btn.on{background:rgba(255,255,255,.18);color:#fff;}
+.snav-btn svg{width:20px;height:20px;flex-shrink:0;}
+.snav-badge{background:var(--red);color:#fff;border-radius:10px;font-size:10px;font-weight:700;min-width:18px;height:18px;display:flex;align-items:center;justify-content:center;padding:0 4px;margin-left:auto;}
+.sidebar-footer{padding:16px 12px;border-top:1px solid rgba(255,255,255,.1);}
+.sidebar-footer-btn{width:100%;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);color:rgba(255,255,255,.8);font-family:'Inter',sans-serif;font-size:13px;font-weight:600;padding:10px 16px;border-radius:10px;cursor:pointer;display:flex;align-items:center;gap:8px;margin-bottom:8px;}
+.sidebar-footer-btn:hover{background:rgba(255,255,255,.18);color:#fff;}
+
+/* Desktop main */
+.desktop-main{margin-left:var(--sidebar);flex:1;display:flex;height:100vh;overflow:hidden;}
+.desktop-panel{flex:1;overflow-y:auto;padding:28px;height:100vh;}
+.desktop-panel+.desktop-panel{border-left:1px solid var(--border);}
+.desktop-panel-title{font-family:'Playfair Display',serif;font-size:22px;font-weight:900;margin-bottom:4px;}
+.desktop-panel-sub{color:var(--muted);font-size:13px;margin-bottom:24px;}
+
+/* Mobile header */
 .hdr{background:var(--g);height:66px;padding:0 16px;display:flex;align-items:center;justify-content:space-between;position:sticky;top:0;z-index:50;box-shadow:0 3px 18px rgba(15,64,36,.3);}
 .hdr-brand{display:flex;align-items:center;gap:11px;}
 .hdr-name{font-family:'Playfair Display',serif;font-weight:900;font-size:16px;color:#fff;line-height:1.15;}
 .hdr-sub{font-size:10px;color:rgba(255,255,255,.55);margin-top:1px;letter-spacing:.6px;text-transform:uppercase;}
 .hdr-actions{display:flex;gap:7px;}
 .hdr-btn{background:rgba(255,255,255,.14);border:1px solid rgba(255,255,255,.22);color:#fff;border-radius:8px;padding:7px 13px;font-size:12px;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif;}
+
+/* Mobile nav */
 .nav{position:fixed;bottom:0;left:0;right:0;max-width:480px;margin:0 auto;background:var(--card);border-top:1px solid var(--border);display:flex;z-index:50;padding-bottom:env(safe-area-inset-bottom,0px);box-shadow:0 -2px 16px rgba(0,0,0,.07);}
 .nt{flex:1;background:none;border:none;padding:10px 4px 13px;display:flex;flex-direction:column;align-items:center;gap:3px;cursor:pointer;color:var(--muted);font-size:10px;font-weight:600;font-family:'Inter',sans-serif;position:relative;transition:color .15s;}
 .nt.on{color:var(--g);}
 .nt svg{width:22px;height:22px;}
 .ndot{position:absolute;top:7px;right:calc(50% - 20px);background:var(--red);color:#fff;border-radius:10px;font-size:9px;font-weight:700;min-width:16px;height:16px;display:flex;align-items:center;justify-content:center;padding:0 3px;}
+
 .pg{flex:1;padding:18px 16px 92px;}
 .sh{font-family:'Playfair Display',serif;font-size:24px;font-weight:900;margin-bottom:2px;}
 .ss{color:var(--muted);font-size:13px;margin-bottom:20px;}
@@ -167,10 +234,9 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);}
 .qb:active{transform:scale(.88);} .qb.rm{background:var(--redf);color:var(--red);}
 .qn{font-weight:700;font-size:17px;min-width:22px;text-align:center;}
 .cbar{position:fixed;bottom:65px;left:16px;right:16px;max-width:448px;margin:0 auto;background:var(--g);color:#fff;border-radius:14px;padding:15px 20px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 6px 24px rgba(15,64,36,.4);cursor:pointer;z-index:40;}
+.cbar-desktop{position:sticky;bottom:0;background:var(--g);color:#fff;border-radius:14px;padding:15px 20px;display:flex;align-items:center;justify-content:space-between;box-shadow:0 6px 24px rgba(15,64,36,.4);cursor:pointer;margin-top:16px;}
 .cbl{font-size:12px;opacity:.7;} .cbt{font-family:'Playfair Display',serif;font-weight:900;font-size:22px;}
 .cbb{background:#fff;color:var(--g);border-radius:9px;padding:10px 16px;font-weight:700;font-size:13px;}
-
-/* Kitchen cards */
 .kc{background:var(--card);border-radius:var(--r);box-shadow:var(--sh);margin-bottom:12px;overflow:hidden;border-left:4px solid #ccc;}
 .kch{padding:14px 16px;display:flex;justify-content:space-between;align-items:flex-start;border-bottom:1px solid var(--border);}
 .kct{font-family:'Playfair Display',serif;font-weight:700;font-size:17px;}
@@ -180,31 +246,19 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);}
 .kiq{font-weight:700;color:var(--g);font-size:15px;}
 .kin{font-size:12px;color:var(--muted);}
 .kcf{padding:12px 16px;border-top:1px solid var(--border);}
-
-/* Stage badge */
 .sbadge{display:inline-flex;align-items:center;gap:5px;padding:5px 12px;border-radius:20px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;}
-
-/* Orders */
-.oc{background:var(--card);border-radius:var(--r);box-shadow:var(--sh);margin-bottom:10px;overflow:hidden;cursor:pointer;transition:box-shadow .15s;}
-.oc:active{box-shadow:0 1px 4px rgba(0,0,0,.08);}
+.oc{background:var(--card);border-radius:var(--r);box-shadow:var(--sh);margin-bottom:10px;overflow:hidden;cursor:pointer;}
 .ocr{padding:14px 16px;display:flex;align-items:center;justify-content:space-between;gap:12px;}
 .ocn{font-family:'Playfair Display',serif;font-weight:700;font-size:16px;margin-bottom:5px;}
 .ocm{display:flex;gap:6px;flex-wrap:wrap;}
-
-/* Order detail */
 .detail-item{padding:12px 0;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;}
 .detail-item:last-child{border-bottom:none;}
 .detail-item-name{font-size:14px;font-weight:500;}
 .detail-item-note{font-size:12px;color:var(--muted);margin-top:2px;}
-.detail-item-price{font-weight:700;color:var(--g);font-size:14px;}
 .action-bar{display:flex;gap:8px;flex-wrap:wrap;margin-top:16px;}
-
-/* Payment */
 .pmethods{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:16px 0;}
 .ptile{background:var(--card);border:2px solid var(--border);border-radius:var(--r);padding:22px 16px;display:flex;flex-direction:column;align-items:center;gap:10px;cursor:pointer;transition:all .15s;font-weight:700;font-size:15px;}
 .ptile svg{width:32px;height:32px;} .ptile.on{border-color:var(--g);background:var(--gp);color:var(--g);}
-
-/* Reports */
 .periods{display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap;}
 .pb{padding:9px 18px;border-radius:24px;border:1.5px solid var(--border);background:var(--card);font-size:13px;font-weight:600;cursor:pointer;font-family:'Inter',sans-serif;}
 .pb.on{background:var(--g);border-color:var(--g);color:#fff;}
@@ -219,8 +273,6 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);}
 .trk{width:26px;height:26px;border-radius:50%;background:var(--gp);color:var(--g);font-weight:700;font-size:12px;display:flex;align-items:center;justify-content:center;margin-right:12px;flex-shrink:0;}
 .trn{flex:1;font-size:14px;font-weight:500;}
 .trc{font-weight:700;color:var(--muted);font-size:13px;}
-
-/* Admin */
 .ai{background:var(--card);border-radius:12px;padding:14px 16px;display:flex;align-items:center;gap:12px;box-shadow:var(--sh);margin-bottom:8px;}
 .ain{font-weight:500;font-size:14px;} .aic{font-size:12px;color:var(--muted);}
 .pinp{width:82px;border:1.5px solid var(--border);border-radius:8px;padding:8px 10px;font-size:14px;font-weight:700;font-family:'Inter',sans-serif;text-align:right;color:var(--g);}
@@ -230,8 +282,6 @@ body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);}
 .tsl{position:absolute;cursor:pointer;inset:0;background:var(--border);border-radius:24px;transition:.2s;}
 .tsl:before{position:absolute;content:"";height:18px;width:18px;left:3px;bottom:3px;background:#fff;border-radius:50%;transition:.2s;}
 input:checked+.tsl{background:var(--g);} input:checked+.tsl:before{transform:translateX(20px);}
-
-/* PIN */
 .pinwrap{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:65vh;gap:26px;}
 .pindots{display:flex;gap:14px;}
 .pindot{width:14px;height:14px;border-radius:50%;border:2px solid var(--g);transition:background .15s;}
@@ -239,16 +289,20 @@ input:checked+.tsl{background:var(--g);} input:checked+.tsl:before{transform:tra
 .pingrid{display:grid;grid-template-columns:repeat(3,76px);gap:12px;}
 .pinkey{width:76px;height:76px;border-radius:50%;border:none;background:var(--card);box-shadow:var(--sh);font-family:'Playfair Display',serif;font-size:26px;font-weight:700;cursor:pointer;transition:all .15s;}
 .pinkey:active{transform:scale(.88);background:var(--gp);}
-
-/* Overlay/modal */
 .overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;display:flex;align-items:flex-end;}
 .modal{background:var(--card);border-radius:20px 20px 0 0;padding:24px 20px;width:100%;}
 .modalt{font-family:'Playfair Display',serif;font-weight:700;font-size:19px;margin-bottom:16px;}
 .confirm-wrap{position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:250;display:flex;align-items:center;justify-content:center;padding:20px;}
 .confirm-box{background:var(--card);border-radius:16px;padding:24px;width:100%;max-width:320px;}
-
-/* Notif banner */
 .nbanner{background:var(--gp);border:1.5px solid var(--g);border-radius:12px;padding:12px 16px;display:flex;align-items:center;gap:10px;margin-bottom:16px;cursor:pointer;}
+
+/* Login */
+.login-wrap{min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--g);padding:24px;}
+.login-box{background:var(--card);border-radius:24px;padding:40px 32px;width:100%;max-width:400px;box-shadow:0 20px 60px rgba(0,0,0,.2);}
+.login-logo{display:flex;justify-content:center;margin-bottom:24px;}
+.login-title{font-family:'Playfair Display',serif;font-weight:900;font-size:26px;text-align:center;margin-bottom:4px;}
+.login-sub{color:var(--muted);font-size:14px;text-align:center;margin-bottom:32px;}
+.login-err{background:var(--redf);color:var(--red);border-radius:10px;padding:12px 16px;font-size:13px;font-weight:600;margin-bottom:16px;text-align:center;}
 
 /* Misc */
 .divider{height:1px;background:var(--border);margin:13px 0;}
@@ -259,7 +313,7 @@ input:checked+.tsl{background:var(--g);} input:checked+.tsl:before{transform:tra
 .inp:focus{outline:none;border-color:var(--g);}
 .lbl{font-size:13px;font-weight:600;color:var(--muted);margin-bottom:6px;display:block;}
 .setup{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:72vh;gap:20px;padding:32px 24px;text-align:center;}
-.toast{position:fixed;top:74px;left:50%;transform:translateX(-50%);background:#1a1a10;color:#fff;padding:11px 20px;border-radius:10px;font-size:14px;font-weight:500;z-index:300;animation:fio 2.5s ease forwards;white-space:nowrap;pointer-events:none;}
+.toast{position:fixed;top:20px;left:50%;transform:translateX(-50%);background:#1a1a10;color:#fff;padding:11px 20px;border-radius:10px;font-size:14px;font-weight:500;z-index:400;animation:fio 2.5s ease forwards;white-space:nowrap;pointer-events:none;}
 @keyframes fio{0%{opacity:0;transform:translateX(-50%) translateY(-8px)}12%{opacity:1;transform:translateX(-50%) translateY(0)}78%{opacity:1}100%{opacity:0}}
 `;
 
@@ -279,19 +333,19 @@ const Ic = {
   Trash:    ()=><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>,
   Bell:     ()=><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>,
   Arrow:    ()=><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="9 18 15 12 9 6"/></svg>,
+  Reports:  ()=><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>,
+  Admin:    ()=><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 3.6-7 8-7s8 3 8 7"/></svg>,
+  Lock:     ()=><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0110 0v4"/></svg>,
+  Logout:   ()=><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>,
 };
 
 const Toast = ({msg}) => msg ? <div className="toast">{msg}</div> : null;
-
-// ── Stage Badge ───────────────────────────────────────────────────
 const StageBadge = ({status}) => (
-  <span className="sbadge" style={{background:STAGE_BG[status]||"#f0f0ec", color:STAGE_COLOR[status]||"#888"}}>
+  <span className="sbadge" style={{background:STAGE_BG[status]||"#f0f0ec",color:STAGE_COLOR[status]||"#888"}}>
     {status==="not-started"?"🔴":status==="busy"?"🟡":"🟢"} {STAGE_LABEL[status]||status}
   </span>
 );
-
-// ── Confirm Dialog ────────────────────────────────────────────────
-const Confirm = ({title, msg, onOk, onCancel, danger}) => (
+const Confirm = ({title,msg,onOk,onCancel,danger}) => (
   <div className="confirm-wrap" onClick={onCancel}>
     <div className="confirm-box" onClick={e=>e.stopPropagation()}>
       <div style={{fontFamily:"'Playfair Display',serif",fontWeight:700,fontSize:18,marginBottom:8}}>{title}</div>
@@ -304,8 +358,47 @@ const Confirm = ({title, msg, onOk, onCancel, danger}) => (
   </div>
 );
 
+// ── Login Screen ──────────────────────────────────────────────────
+const LoginScreen = ({onLogin}) => {
+  const [email,setEmail]=useState("shop@obaladesuya.nl");
+  const [pw,setPw]=useState("");
+  const [err,setErr]=useState("");
+  const [busy,setBusy]=useState(false);
+
+  const login = async () => {
+    setBusy(true); setErr("");
+    try {
+      const d = await sbAuth(email, pw);
+      localStorage.setItem("sb_access", d.access_token);
+      localStorage.setItem("sb_refresh", d.refresh_token);
+      onLogin(d);
+    } catch(e) { setErr(e.message); }
+    setBusy(false);
+  };
+
+  return (
+    <div className="login-wrap">
+      <style>{S}</style>
+      <div className="login-box">
+        <div className="login-logo"><ObaladeLogo size={80}/></div>
+        <div className="login-title">Obalade Suya</div>
+        <div className="login-sub">POS System · Amsterdam</div>
+        {err && <div className="login-err">{err}</div>}
+        <label className="lbl">Email</label>
+        <input className="inp" type="email" value={email} onChange={e=>setEmail(e.target.value)} placeholder="email"/>
+        <label className="lbl">Password</label>
+        <input className="inp" type="password" value={pw} onChange={e=>setPw(e.target.value)} placeholder="••••••••"
+          onKeyDown={e=>e.key==="Enter"&&login()}/>
+        <button className="btn bp bw" onClick={login} disabled={busy||!pw}>
+          {busy?"Signing in…":"Sign In"}
+        </button>
+      </div>
+    </div>
+  );
+};
+
 // ── PIN Screen ────────────────────────────────────────────────────
-const PinScreen = ({title, onSuccess, onCancel}) => {
+const PinScreen = ({title,onSuccess,onCancel}) => {
   const [pin,setPin]=useState(""); const [err,setErr]=useState(false);
   const press = k => {
     if(pin.length>=4) return;
@@ -327,7 +420,6 @@ const PinScreen = ({title, onSuccess, onCancel}) => {
   );
 };
 
-// ── Setup ─────────────────────────────────────────────────────────
 const SetupScreen = ({onSeed,seeding}) => (
   <div className="pg"><div className="setup">
     <ObaladeLogo size={96}/>
@@ -354,12 +446,15 @@ const NewOrderScreen = ({onStart}) => {
 };
 
 // ── Menu Builder ──────────────────────────────────────────────────
-const MenuScreen = ({menuItems, orderType, tableRef, onSend, onBack, existingItems=[], editMode=false}) => {
-  const initCart = () => { const c={}; existingItems.forEach(i=>{c[i.menu_item_id||i.id]=i.quantity;}); return c; };
-  const initNotes = () => { const n={}; existingItems.forEach(i=>{if(i.note) n[i.menu_item_id||i.id]=i.note;}); return n; };
-  const [cart,setCart]=useState(initCart); const [cat,setCat]=useState(MENU_CATEGORIES[0]);
-  const [noteItem,setNoteItem]=useState(null); const [noteText,setNoteText]=useState("");
-  const [notes,setNotes]=useState(initNotes); const [sending,setSending]=useState(false);
+const MenuScreen = ({menuItems,orderType,tableRef,onSend,onBack,existingItems=[],editMode=false,desktop=false}) => {
+  const initCart=()=>{const c={};existingItems.forEach(i=>{c[i.menu_item_id||i.id]=i.quantity;});return c;};
+  const initNotes=()=>{const n={};existingItems.forEach(i=>{if(i.note)n[i.menu_item_id||i.id]=i.note;});return n;};
+  const [cart,setCart]=useState(initCart);
+  const [cat,setCat]=useState(MENU_CATEGORIES[0]);
+  const [noteItem,setNoteItem]=useState(null);
+  const [noteText,setNoteText]=useState("");
+  const [notes,setNotes]=useState(initNotes);
+  const [sending,setSending]=useState(false);
   const catItems=menuItems.filter(i=>i.available&&i.category===cat);
   const qty=id=>cart[id]||0;
   const add=item=>setCart(c=>({...c,[item.id]:(c[item.id]||0)+1}));
@@ -368,8 +463,9 @@ const MenuScreen = ({menuItems, orderType, tableRef, onSend, onBack, existingIte
   const total=cartList.reduce((s,i)=>s+Number(i.price)*i.quantity,0);
   const itemCount=cartList.reduce((s,i)=>s+i.quantity,0);
   const send=async()=>{if(!cartList.length||sending)return;setSending(true);await onSend(cartList,total);setSending(false);};
+  const wrap = desktop ? "desktop-panel" : "pg";
   return (
-    <div className="pg">
+    <div className={wrap}>
       <div className="row" style={{marginBottom:16}}>
         <button className="btn bo bsm" onClick={onBack}><Ic.Back/> Back</button>
         <div style={{textAlign:"right"}}>
@@ -378,7 +474,7 @@ const MenuScreen = ({menuItems, orderType, tableRef, onSend, onBack, existingIte
         </div>
       </div>
       <div className="cats">{MENU_CATEGORIES.map(c=><div key={c} className={`cp${cat===c?" on":""}`} onClick={()=>setCat(c)}>{c}</div>)}</div>
-      {catItems.length===0&&<div className="empty"><div className="emico">🍽️</div><div style={{fontSize:14}}>No items in this category</div></div>}
+      {catItems.length===0&&<div className="empty"><div className="emico">🍽️</div><div style={{fontSize:14}}>No items</div></div>}
       {catItems.map(item=>(
         <div key={item.id} className="mi">
           <div style={{flex:1,paddingRight:12}}><div className="mn">{item.name}</div><div className="mp">€{Number(item.price).toFixed(2)}</div></div>
@@ -393,10 +489,15 @@ const MenuScreen = ({menuItems, orderType, tableRef, onSend, onBack, existingIte
         </div>
       ))}
       {itemCount>0&&(
-        <div className="cbar" onClick={send} style={{cursor:sending?"wait":"pointer"}}>
-          <div><div className="cbl">{itemCount} item{itemCount!==1?"s":""}</div><div className="cbt">€{total.toFixed(2)}</div></div>
-          <div className="cbb">{sending?"Saving…":(editMode?"Save Changes →":"Send to Kitchen →")}</div>
-        </div>
+        desktop
+          ? <div className="cbar-desktop" onClick={send} style={{cursor:sending?"wait":"pointer"}}>
+              <div><div className="cbl">{itemCount} item{itemCount!==1?"s":""}</div><div className="cbt">€{total.toFixed(2)}</div></div>
+              <div className="cbb">{sending?"Saving…":(editMode?"Save Changes →":"Send to Kitchen →")}</div>
+            </div>
+          : <div className="cbar" onClick={send} style={{cursor:sending?"wait":"pointer"}}>
+              <div><div className="cbl">{itemCount} item{itemCount!==1?"s":""}</div><div className="cbt">€{total.toFixed(2)}</div></div>
+              <div className="cbb">{sending?"Saving…":(editMode?"Save Changes →":"Send to Kitchen →")}</div>
+            </div>
       )}
       {noteItem&&(
         <div className="overlay" onClick={()=>setNoteItem(null)}>
@@ -411,66 +512,50 @@ const MenuScreen = ({menuItems, orderType, tableRef, onSend, onBack, existingIte
   );
 };
 
-// ── Kitchen Screen ─────────────────────────────────────────────────
-const KitchenScreen = ({orders, orderItems, onAdvance, onRefresh}) => {
-  const active = orders.filter(o=>o.status!=="paid").sort((a,b)=>new Date(a.created_at)-new Date(b.created_at));
-  const [notifEnabled,setNotifEnabled]=useState(typeof Notification !== "undefined" && Notification.permission==="granted");
-  const enableNotifs=async()=>{const ok=await requestNotifPermission();setNotifEnabled(ok);};
-
-  // Group by stage for visual ordering: not-started first, then busy, then ready
-  const grouped = [
-    ...active.filter(o=>o.status==="not-started"),
-    ...active.filter(o=>o.status==="busy"),
-    ...active.filter(o=>o.status==="ready"),
+// ── Kitchen Panel ─────────────────────────────────────────────────
+const KitchenPanel = ({orders,orderItems,onAdvance,onRefresh,desktop=false}) => {
+  const [notifEnabled,setNotifEnabled]=useState(safeNotif.permission()==="granted");
+  const enableNotifs=async()=>{const ok=await safeNotif.request();setNotifEnabled(ok);};
+  const grouped=[
+    ...orders.filter(o=>o.status==="not-started"),
+    ...orders.filter(o=>o.status==="busy"),
+    ...orders.filter(o=>o.status==="ready"),
   ];
-
+  const wrap = desktop ? "desktop-panel" : "pg";
   return (
-    <div className="pg">
-      <div className="row" style={{marginBottom:4}}>
-        <div className="sh">Kitchen</div>
-        <button className="btn bo bsm" onClick={onRefresh}><Ic.Refresh/></button>
-      </div>
-      <div className="ss">{active.length} active order{active.length!==1?"s":""}</div>
-
-      {!notifEnabled&&"Notification" in window&&(
+    <div className={wrap}>
+      {desktop
+        ? <div><div className="desktop-panel-title">Kitchen</div><div className="desktop-panel-sub">{grouped.length} active order{grouped.length!==1?"s":""}</div></div>
+        : <><div className="row" style={{marginBottom:4}}><div className="sh">Kitchen</div><button className="btn bo bsm" onClick={onRefresh}><Ic.Refresh/></button></div><div className="ss">{grouped.length} active order{grouped.length!==1?"s":""}</div></>
+      }
+      {!notifEnabled&&safeNotif.supported()&&(
         <div className="nbanner" onClick={enableNotifs}>
-          <Ic.Bell/>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="var(--g)" strokeWidth="2"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 01-3.46 0"/></svg>
           <span style={{flex:1,fontSize:13,color:"var(--g)",fontWeight:600}}>Tap to enable ready notifications</span>
           <span style={{fontSize:12,color:"var(--g)"}}>Enable →</span>
         </div>
       )}
-
       {grouped.length===0&&<div className="empty"><div className="emico">🍳</div><div style={{fontSize:14}}>No active orders</div></div>}
-
       {grouped.map(o=>{
         const items=orderItems.filter(i=>i.order_id===o.id);
         const nextStage=STAGE_NEXT[o.status];
-        const borderColor=STAGE_COLOR[o.status]||"#ccc";
         return (
-          <div key={o.id} className="kc" style={{borderLeftColor:borderColor}}>
+          <div key={o.id} className="kc" style={{borderLeftColor:STAGE_COLOR[o.status]||"#ccc"}}>
             <div className="kch">
-              <div>
-                <div className="kct">{orderLabel(o)}</div>
-                <div className="kctm">{timeAgo(o.created_at)} ago</div>
-              </div>
+              <div><div className="kct">{orderLabel(o)}</div><div className="kctm">{timeAgo(o.created_at)} ago</div></div>
               <StageBadge status={o.status}/>
             </div>
             <div className="kcb">
               {items.map(i=>(
                 <div key={i.id} className="ki">
-                  <span className="kiq">{i.quantity}×</span>
-                  <span>{i.item_name}</span>
+                  <span className="kiq">{i.quantity}×</span><span>{i.item_name}</span>
                   {i.note&&<span className="kin"> — {i.note}</span>}
                 </div>
               ))}
             </div>
             {nextStage&&(
               <div className="kcf">
-                <button
-                  className="btn bw bsm"
-                  style={{background:STAGE_COLOR[nextStage],color:"#fff"}}
-                  onClick={()=>onAdvance(o.id,nextStage)}
-                >
+                <button className="btn bw bsm" style={{background:STAGE_COLOR[nextStage],color:"#fff"}} onClick={()=>onAdvance(o.id,nextStage)}>
                   {STAGE_BTN[o.status]}
                 </button>
               </div>
@@ -478,75 +563,22 @@ const KitchenScreen = ({orders, orderItems, onAdvance, onRefresh}) => {
           </div>
         );
       })}
+      {desktop&&<div style={{height:16}}/>}
     </div>
   );
 };
 
-// ── Order Detail Screen ────────────────────────────────────────────
-const OrderDetailScreen = ({order, orderItems, isAdmin, onBack, onPay, onEdit, onDelete}) => {
-  const [confirmDel,setConfirmDel]=useState(false);
-  const items=orderItems.filter(i=>i.order_id===order.id);
-  const total=Number(order.total);
-  return (
-    <div className="pg">
-      <button className="btn bo bsm" style={{marginBottom:16}} onClick={onBack}><Ic.Back/> Back</button>
-      <div className="sh">{orderLabel(order)}</div>
-      <div style={{display:"flex",gap:8,marginBottom:20,flexWrap:"wrap"}}>
-        <span className={`sbadge`} style={{background:order.type==="dine-in"?"#e8f0fe":"#fef3e8",color:order.type==="dine-in"?"#1a56db":"#b45309"}}>
-          {order.type}
-        </span>
-        <StageBadge status={order.status}/>
-        <span style={{color:"var(--muted)",fontSize:13,alignSelf:"center"}}>{timeAgo(order.created_at)} ago</span>
-      </div>
-
-      <div className="card" style={{padding:"0 16px",marginBottom:20}}>
-        {items.map(i=>(
-          <div key={i.id} className="detail-item">
-            <div style={{flex:1}}>
-              <div className="detail-item-name">{i.quantity}× {i.item_name}</div>
-              {i.note&&<div className="detail-item-note">Note: {i.note}</div>}
-            </div>
-            <div className="detail-item-price">€{(Number(i.price)*i.quantity).toFixed(2)}</div>
-          </div>
-        ))}
-        <div className="row" style={{padding:"14px 0",borderTop:"2px solid var(--border)",marginTop:4}}>
-          <span style={{fontFamily:"'Playfair Display',serif",fontWeight:700,fontSize:18}}>Total</span>
-          <span style={{fontFamily:"'Playfair Display',serif",fontWeight:900,fontSize:24,color:"var(--g)"}}>€{total.toFixed(2)}</span>
-        </div>
-      </div>
-
-      <div className="action-bar">
-        {order.status==="ready"&&(
-          <button className="btn bg2 bsm" style={{flex:1}} onClick={()=>onPay(order)}>💳 Collect Payment</button>
-        )}
-        {order.status!=="paid"&&order.status!=="ready"&&(
-          <button className="btn bo bsm" style={{flex:1}} onClick={()=>onEdit(order)}><Ic.Edit/> Edit Order</button>
-        )}
-        {isAdmin&&(
-          <button className="btn bd bsm" onClick={()=>setConfirmDel(true)}><Ic.Trash/></button>
-        )}
-      </div>
-
-      {confirmDel&&(
-        <Confirm
-          title="Delete Order"
-          msg={`Delete order for ${orderLabel(order)}? This cannot be undone.`}
-          danger
-          onOk={()=>{onDelete(order.id);setConfirmDel(false);}}
-          onCancel={()=>setConfirmDel(false)}
-        />
-      )}
-    </div>
-  );
-};
-
-// ── Orders Overview ────────────────────────────────────────────────
-const OrdersScreen = ({orders, onSelect}) => {
+// ── Orders Panel ──────────────────────────────────────────────────
+const OrdersPanel = ({orders,onSelect,desktop=false}) => {
   const active=orders.filter(o=>o.status!=="paid").sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
   const done=orders.filter(o=>o.status==="paid").sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)).slice(0,20);
+  const wrap = desktop ? "desktop-panel" : "pg";
   return (
-    <div className="pg">
-      <div className="sh">Orders</div><div className="ss">Tap an order to view details</div>
+    <div className={wrap}>
+      {desktop
+        ? <div><div className="desktop-panel-title">Orders</div><div className="desktop-panel-sub">Tap to view details & payment</div></div>
+        : <><div className="sh">Orders</div><div className="ss">Tap to view details</div></>
+      }
       {active.length===0&&done.length===0&&<div className="empty"><div className="emico">📋</div><div style={{fontSize:14}}>No orders yet today</div></div>}
       {active.length>0&&<>
         <div className="slabel">Active ({active.length})</div>
@@ -578,9 +610,7 @@ const OrdersScreen = ({orders, onSelect}) => {
             <div className="ocr">
               <div style={{flex:1}}>
                 <div className="ocn">{orderLabel(o)}</div>
-                <div className="ocm">
-                  <span className="sbadge" style={{background:"#f0f0ec",color:"var(--muted)",fontSize:10}}>paid</span>
-                </div>
+                <div className="ocm"><span className="sbadge" style={{background:"#f0f0ec",color:"var(--muted)",fontSize:10}}>paid</span></div>
               </div>
               <div style={{display:"flex",alignItems:"center",gap:8}}>
                 <div style={{fontFamily:"'Playfair Display',serif",fontWeight:900,fontSize:18}}>€{Number(o.total).toFixed(2)}</div>
@@ -594,13 +624,53 @@ const OrdersScreen = ({orders, onSelect}) => {
   );
 };
 
-// ── Payment Screen ─────────────────────────────────────────────────
-const PaymentScreen = ({order, orderItems, onConfirm, onBack}) => {
+// ── Order Detail ──────────────────────────────────────────────────
+const OrderDetailScreen = ({order,orderItems,isAdmin,onBack,onPay,onEdit,onDelete,desktop=false}) => {
+  const [confirmDel,setConfirmDel]=useState(false);
+  const items=orderItems.filter(i=>i.order_id===order.id);
+  const wrap = desktop ? "desktop-panel" : "pg";
+  return (
+    <div className={wrap}>
+      <button className="btn bo bsm" style={{marginBottom:16}} onClick={onBack}><Ic.Back/> Back</button>
+      <div className="sh">{orderLabel(order)}</div>
+      <div style={{display:"flex",gap:8,marginBottom:20,flexWrap:"wrap"}}>
+        <span className="sbadge" style={{background:order.type==="dine-in"?"#e8f0fe":"#fef3e8",color:order.type==="dine-in"?"#1a56db":"#b45309"}}>{order.type}</span>
+        <StageBadge status={order.status}/>
+        <span style={{color:"var(--muted)",fontSize:13,alignSelf:"center"}}>{timeAgo(order.created_at)} ago</span>
+      </div>
+      <div className="card" style={{padding:"0 16px",marginBottom:20}}>
+        {items.map(i=>(
+          <div key={i.id} className="detail-item">
+            <div style={{flex:1}}>
+              <div className="detail-item-name">{i.quantity}× {i.item_name}</div>
+              {i.note&&<div className="detail-item-note">Note: {i.note}</div>}
+            </div>
+            <div style={{fontWeight:700,color:"var(--g)",fontSize:14}}>€{(Number(i.price)*i.quantity).toFixed(2)}</div>
+          </div>
+        ))}
+        <div className="row" style={{padding:"14px 0",borderTop:"2px solid var(--border)",marginTop:4}}>
+          <span style={{fontFamily:"'Playfair Display',serif",fontWeight:700,fontSize:18}}>Total</span>
+          <span style={{fontFamily:"'Playfair Display',serif",fontWeight:900,fontSize:24,color:"var(--g)"}}>€{Number(order.total).toFixed(2)}</span>
+        </div>
+      </div>
+      <div className="action-bar">
+        {order.status==="ready"&&<button className="btn bg2 bsm" style={{flex:1}} onClick={()=>onPay(order)}>💳 Collect Payment</button>}
+        {order.status!=="paid"&&order.status!=="ready"&&<button className="btn bo bsm" style={{flex:1}} onClick={()=>onEdit(order)}><Ic.Edit/> Edit Order</button>}
+        {isAdmin&&<button className="btn bd bsm" onClick={()=>setConfirmDel(true)}><Ic.Trash/></button>}
+      </div>
+      {confirmDel&&<Confirm title="Delete Order" msg={`Delete order for ${orderLabel(order)}? Cannot be undone.`} danger onOk={()=>{onDelete(order.id);setConfirmDel(false);}} onCancel={()=>setConfirmDel(false)}/>}
+    </div>
+  );
+};
+
+// ── Payment Screen ────────────────────────────────────────────────
+const PaymentScreen = ({order,orderItems,onConfirm,onBack,desktop=false}) => {
   const [method,setMethod]=useState(null); const [busy,setBusy]=useState(false);
   const items=orderItems.filter(i=>i.order_id===order.id);
   const confirm=async()=>{setBusy(true);await onConfirm(order,method);setBusy(false);};
+  const wrap = desktop ? "desktop-panel" : "pg";
   return (
-    <div className="pg">
+    <div className={wrap}>
       <button className="btn bo bsm" style={{marginBottom:16}} onClick={onBack}><Ic.Back/> Back</button>
       <div className="sh">Payment</div><div className="ss">{orderLabel(order)}</div>
       <div className="card" style={{padding:16,marginBottom:16}}>
@@ -627,8 +697,8 @@ const PaymentScreen = ({order, orderItems, onConfirm, onBack}) => {
   );
 };
 
-// ── Reports ───────────────────────────────────────────────────────
-const ReportsScreen = ({orders, orderItems, payments, onLock}) => {
+// ── Reports Screen ────────────────────────────────────────────────
+const ReportsScreen = ({orders,orderItems,payments,onLock,desktop=false}) => {
   const [period,setPeriod]=useState("today");
   const start=getStartOf(period);
   const paidOrders=orders.filter(o=>o.status==="paid"&&new Date(o.created_at)>=start);
@@ -642,11 +712,15 @@ const ReportsScreen = ({orders, orderItems, payments, onLock}) => {
   const paidIds=new Set(paidOrders.map(o=>o.id));
   const counts={};
   orderItems.filter(i=>paidIds.has(i.order_id)).forEach(i=>{counts[i.item_name]=(counts[i.item_name]||0)+i.quantity;});
-  const top=Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  const top=Object.entries(counts).sort((a,b)=>b[1]-a[1]).slice(0,10);
   const labels={today:"Today",week:"Last 7 days",month:"Last 30 days",year:"Last 12 months"};
+  const wrap = desktop ? "desktop-panel" : "pg";
   return (
-    <div className="pg">
-      <div className="row" style={{marginBottom:20}}><div className="sh">Reports</div><button className="btn bo bsm" onClick={onLock}>🔒 Lock</button></div>
+    <div className={wrap}>
+      <div className="row" style={{marginBottom:20}}>
+        <div>{desktop?<div className="desktop-panel-title">Reports</div>:<div className="sh">Reports</div>}</div>
+        <button className="btn bo bsm" onClick={onLock}><Ic.Lock/> Lock</button>
+      </div>
       <div className="periods">{["today","week","month","year"].map(p=><button key={p} className={`pb${period===p?" on":""}`} onClick={()=>setPeriod(p)}>{p.charAt(0).toUpperCase()+p.slice(1)}</button>)}</div>
       <div style={{color:"var(--muted)",fontSize:12,marginBottom:16}}>{labels[period]}</div>
       <div className="sgrid">
@@ -668,14 +742,18 @@ const ReportsScreen = ({orders, orderItems, payments, onLock}) => {
   );
 };
 
-// ── Admin ─────────────────────────────────────────────────────────
-const AdminScreen = ({menuItems, onUpdate, onLock}) => {
+// ── Admin Screen ──────────────────────────────────────────────────
+const AdminScreen = ({menuItems,onUpdate,onLock,desktop=false}) => {
   const [cat,setCat]=useState(MENU_CATEGORIES[0]); const [prices,setPrices]=useState({}); const [saved,setSaved]=useState({});
   const items=menuItems.filter(i=>i.category===cat);
   const savePrice=async item=>{const v=parseFloat(prices[item.id]);if(isNaN(v))return;await onUpdate(item.id,{price:v});setSaved(s=>({...s,[item.id]:true}));setTimeout(()=>setSaved(s=>({...s,[item.id]:false})),1500);setPrices(p=>{const n={...p};delete n[item.id];return n;});};
+  const wrap = desktop ? "desktop-panel" : "pg";
   return (
-    <div className="pg">
-      <div className="row" style={{marginBottom:20}}><div><div className="sh">Menu Admin</div><div style={{color:"var(--muted)",fontSize:13,marginTop:2}}>Edit prices & availability</div></div><button className="btn bo bsm" onClick={onLock}>🔒 Lock</button></div>
+    <div className={wrap}>
+      <div className="row" style={{marginBottom:20}}>
+        <div>{desktop?<div className="desktop-panel-title">Menu Admin</div>:<div className="sh">Menu Admin</div>}<div style={{color:"var(--muted)",fontSize:13,marginTop:2}}>Edit prices & availability</div></div>
+        <button className="btn bo bsm" onClick={onLock}><Ic.Lock/> Lock</button>
+      </div>
       <div className="cats" style={{marginBottom:20}}>{MENU_CATEGORIES.map(c=><div key={c} className={`cp${cat===c?" on":""}`} onClick={()=>setCat(c)}>{c}</div>)}</div>
       {items.map(item=>(
         <div key={item.id} className="ai">
@@ -697,13 +775,16 @@ const AdminScreen = ({menuItems, onUpdate, onLock}) => {
 
 // ── App ───────────────────────────────────────────────────────────
 export default function App() {
-  const [tab,setTab]             = useState("new");
-  const [screen,setScreen]       = useState(null);
-  const [orderCtx,setOrderCtx]   = useState(null);
+  const [session,setSession]         = useState(null);
+  const [authLoading,setAuthLoading] = useState(true);
+  const [tab,setTab]                 = useState("new");
+  const [screen,setScreen]           = useState(null);
+  const [orderCtx,setOrderCtx]       = useState(null);
   const [selectedOrder,setSelectedOrder] = useState(null);
-  const [payOrder,setPayOrder]   = useState(null);
-  const [editOrder,setEditOrder] = useState(null);
-  const [isAdmin,setIsAdmin]     = useState(false);
+  const [payOrder,setPayOrder]       = useState(null);
+  const [editOrder,setEditOrder]     = useState(null);
+  const [isAdmin,setIsAdmin]         = useState(false);
+  const [isDesktop,setIsDesktop]     = useState(window.innerWidth>=768);
 
   const [menuItems,setMenuItems]   = useState([]);
   const [orders,setOrders]         = useState([]);
@@ -715,6 +796,39 @@ export default function App() {
 
   const prevReadyIds = useRef(new Set());
   const showToast = m => { setToast(m); setTimeout(()=>setToast(""),2500); };
+
+  // Responsive detection
+  useEffect(()=>{
+    const fn=()=>setIsDesktop(window.innerWidth>=768);
+    window.addEventListener("resize",fn);
+    return()=>window.removeEventListener("resize",fn);
+  },[]);
+
+  // Restore session
+  useEffect(()=>{
+    const tryRestore = async () => {
+      const refresh = localStorage.getItem("sb_refresh");
+      if(!refresh){ setAuthLoading(false); return; }
+      try {
+        const d = await sbRefresh(refresh);
+        localStorage.setItem("sb_access", d.access_token);
+        localStorage.setItem("sb_refresh", d.refresh_token);
+        setSession(d);
+      } catch(e) {
+        localStorage.removeItem("sb_access");
+        localStorage.removeItem("sb_refresh");
+      }
+      setAuthLoading(false);
+    };
+    tryRestore();
+  },[]);
+
+  const logout = () => {
+    localStorage.removeItem("sb_access");
+    localStorage.removeItem("sb_refresh");
+    setSession(null);
+    setIsAdmin(false);
+  };
 
   const load = useCallback(async () => {
     try {
@@ -728,148 +842,148 @@ export default function App() {
       const newOrders=o||[];
       newOrders.filter(ord=>ord.status==="ready").forEach(ord=>{
         if(!prevReadyIds.current.has(ord.id)){
-          sendNotif("🍽️ Order Ready!",`${orderLabel(ord)} is ready for collection`);
+          safeNotif.send("🍽️ Order Ready!",`${orderLabel(ord)} is ready for collection`);
           prevReadyIds.current.add(ord.id);
         }
       });
       setOrders(newOrders);
-      // Refresh selected order if viewing detail
-      setSelectedOrder(prev => prev ? (newOrders.find(o=>o.id===prev.id)||prev) : null);
-    } catch(e) { showToast("⚠️ Connection error"); }
+      setSelectedOrder(prev=>prev?(newOrders.find(o=>o.id===prev.id)||prev):null);
+    } catch(e){ showToast("⚠️ Connection error"); }
     setLoading(false);
-  }, []);
+  },[]);
 
-  useEffect(()=>{ load(); const t=setInterval(load,15000); return()=>clearInterval(t); },[load]);
+  useEffect(()=>{ if(session){ load(); const t=setInterval(load,15000); return()=>clearInterval(t); } },[session,load]);
 
-  const seedMenu = async () => {
-    setSeeding(true);
-    try { await dbPost("menu_items",DEFAULT_MENU); await load(); showToast("✓ Menu loaded!"); }
-    catch(e) { showToast("Seed failed"); }
-    setSeeding(false);
-  };
+  const seedMenu=async()=>{ setSeeding(true); try{await dbPost("menu_items",DEFAULT_MENU);await load();showToast("✓ Menu loaded!");}catch(e){showToast("Seed failed");} setSeeding(false); };
+  const createOrder=async(cartItems,total)=>{ try{ const[order]=await dbPost("orders",{type:orderCtx.type,table_number:orderCtx.ref||null,status:"not-started",total}); await dbPost("order_items",cartItems.map(i=>({order_id:order.id,item_name:i.name,category:i.category,quantity:i.quantity,price:Number(i.price),note:i.note||null}))); await load();showToast("✓ Sent to kitchen!");setScreen(null);setTab("kitchen"); }catch(e){showToast("Failed to send order");} };
+  const updateOrder=async(cartItems,total)=>{ try{ await dbDelete(`order_items?order_id=eq.${editOrder.id}`); await dbPost("order_items",cartItems.map(i=>({order_id:editOrder.id,item_name:i.name,category:i.category,quantity:i.quantity,price:Number(i.price),note:i.note||null}))); await dbPatch(`orders?id=eq.${editOrder.id}`,{total}); await load();showToast("✓ Order updated!");setScreen(null);setEditOrder(null);setSelectedOrder(null);setTab("orders"); }catch(e){showToast("Failed to update");} };
+  const deleteOrder=async id=>{ try{ await dbDelete(`order_items?order_id=eq.${id}`);await dbDelete(`payments?order_id=eq.${id}`);await dbDelete(`orders?id=eq.${id}`); await load();showToast("✓ Order deleted");setSelectedOrder(null);setScreen(null); }catch(e){showToast("Delete failed");} };
+  const advanceStage=async(id,next)=>{ try{await dbPatch(`orders?id=eq.${id}`,{status:next});await load();showToast(`✓ ${STAGE_LABEL[next]}`);}catch(e){showToast("Error");} };
+  const confirmPayment=async(order,method)=>{ try{ await dbPatch(`orders?id=eq.${order.id}`,{status:"paid"});await dbPost("payments",{order_id:order.id,method,amount:Number(order.total)}); await load();showToast("✓ Payment confirmed");setScreen(null);setPayOrder(null);setSelectedOrder(null);setTab("orders"); }catch(e){showToast("Payment failed");} };
+  const updateMenuItem=async(id,fields)=>{ try{await dbPatch(`menu_items?id=eq.${id}`,fields);await load();}catch(e){showToast("Save failed");} };
 
-  const createOrder = async (cartItems, total) => {
-    try {
-      // Use "not-started" as initial status
-      const [order] = await dbPost("orders",{type:orderCtx.type,table_number:orderCtx.ref||null,status:"not-started",total});
-      await dbPost("order_items",cartItems.map(i=>({order_id:order.id,item_name:i.name,category:i.category,quantity:i.quantity,price:Number(i.price),note:i.note||null})));
-      await load(); showToast("✓ Sent to kitchen!"); setScreen(null); setTab("kitchen");
-    } catch(e) { showToast("Failed to send order"); console.error(e); }
-  };
+  const kitchenCount=orders.filter(o=>o.status==="not-started").length;
+  const readyCount=orders.filter(o=>o.status==="ready").length;
+  const menuReady=menuItems.length>0;
+  const activeOrders=orders.filter(o=>o.status!=="paid");
 
-  const updateOrder = async (cartItems, total) => {
-    try {
-      await dbDelete(`order_items?order_id=eq.${editOrder.id}`);
-      await dbPost("order_items",cartItems.map(i=>({order_id:editOrder.id,item_name:i.name,category:i.category,quantity:i.quantity,price:Number(i.price),note:i.note||null})));
-      await dbPatch(`orders?id=eq.${editOrder.id}`,{total});
-      await load(); showToast("✓ Order updated!"); setScreen(null); setEditOrder(null); setSelectedOrder(null); setTab("orders");
-    } catch(e) { showToast("Failed to update"); }
-  };
+  // ── Auth loading ──────────────────────────────────────────────
+  if(authLoading) return <div style={{display:"flex",alignItems:"center",justifyContent:"center",minHeight:"100vh",background:"var(--g)"}}><style>{S}</style><ObaladeLogo size={80}/></div>;
+  if(!session) return <LoginScreen onLogin={d=>{setSession(d);}}/>;
 
-  const deleteOrder = async id => {
-    try {
-      await dbDelete(`order_items?order_id=eq.${id}`);
-      await dbDelete(`payments?order_id=eq.${id}`);
-      await dbDelete(`orders?id=eq.${id}`);
-      await load(); showToast("✓ Order deleted"); setSelectedOrder(null); setScreen(null);
-    } catch(e) { showToast("Delete failed"); }
-  };
+  // ── Shared logic for screens ──────────────────────────────────
+  const handleSelectOrder = o => { setSelectedOrder(o); setScreen("order-detail"); };
+  const handlePay = o => { setPayOrder(o); setScreen("payment"); };
+  const handleEdit = o => { setEditOrder(o); setScreen("edit-order"); };
 
-  const advanceStage = async (id, nextStage) => {
-    try { await dbPatch(`orders?id=eq.${id}`,{status:nextStage}); await load(); showToast(`✓ Marked ${STAGE_LABEL[nextStage]}`); }
-    catch(e) { showToast("Error"); }
-  };
+  // ── Desktop Layout ────────────────────────────────────────────
+  if(isDesktop) {
+    const renderRight = () => {
+      if(screen==="pin-reports") return <PinScreen title="Reports" onSuccess={()=>setScreen("reports")} onCancel={()=>setScreen(null)}/>;
+      if(screen==="pin-admin")   return <PinScreen title="Admin" onSuccess={()=>{setIsAdmin(true);setScreen(null);showToast("Admin unlocked ✓");}} onCancel={()=>setScreen(null)}/>;
+      if(screen==="reports")     return <ReportsScreen orders={orders} orderItems={orderItems} payments={payments} onLock={()=>setScreen(null)} desktop/>;
+      if(screen==="admin")       return <AdminScreen menuItems={menuItems} onUpdate={updateMenuItem} onLock={()=>{setScreen(null);setIsAdmin(false);}} desktop/>;
+      if(screen==="menu")        return <MenuScreen menuItems={menuItems} orderType={orderCtx?.type} tableRef={orderCtx?.ref} onSend={createOrder} onBack={()=>setScreen(null)} desktop/>;
+      if(screen==="edit-order")  return <MenuScreen menuItems={menuItems} orderType={editOrder?.type} tableRef={editOrder?.table_number} existingItems={orderItems.filter(i=>i.order_id===editOrder?.id).map(i=>({...i,menu_item_id:menuItems.find(m=>m.name===i.item_name)?.id}))} onSend={updateOrder} onBack={()=>{setScreen(null);setEditOrder(null);}} editMode desktop/>;
+      if(screen==="order-detail"&&selectedOrder) return <OrderDetailScreen order={selectedOrder} orderItems={orderItems} isAdmin={isAdmin} onBack={()=>{setScreen(null);setSelectedOrder(null);}} onPay={handlePay} onEdit={handleEdit} onDelete={deleteOrder} desktop/>;
+      if(screen==="payment"&&payOrder) return <PaymentScreen order={payOrder} orderItems={orderItems} onConfirm={confirmPayment} onBack={()=>{setScreen("order-detail");setPayOrder(null);}} desktop/>;
 
-  const confirmPayment = async (order, method) => {
-    try {
-      await dbPatch(`orders?id=eq.${order.id}`,{status:"paid"});
-      await dbPost("payments",{order_id:order.id,method,amount:Number(order.total)});
-      await load(); showToast("✓ Payment confirmed"); setScreen(null); setPayOrder(null); setSelectedOrder(null); setTab("orders");
-    } catch(e) { showToast("Payment failed"); }
-  };
+      if(tab==="new") return !menuReady ? <SetupScreen onSeed={seedMenu} seeding={seeding}/> : <NewOrderScreen onStart={(type,ref)=>{setOrderCtx({type,ref});setScreen("menu");}}/>;
+      return null;
+    };
 
-  const updateMenuItem = async (id, fields) => {
-    try { await dbPatch(`menu_items?id=eq.${id}`,fields); await load(); }
-    catch(e) { showToast("Save failed"); }
-  };
+    return (
+      <div className="desktop-shell">
+        <style>{S}</style>
+        <Toast msg={toast}/>
 
-  const kitchenCount = orders.filter(o=>o.status==="not-started").length;
-  const readyCount   = orders.filter(o=>o.status==="ready").length;
-  const menuReady    = menuItems.length>0;
+        {/* Sidebar */}
+        <div className="sidebar">
+          <div className="sidebar-logo">
+            <ObaladeLogo size={52}/>
+            <div className="sidebar-logo-name">Obalade Suya</div>
+            <div className="sidebar-logo-sub">POS · Amsterdam</div>
+          </div>
+          <div className="sidebar-nav">
+            <button className={`snav-btn${tab==="new"&&!screen?" on":""}`} onClick={()=>{setTab("new");setScreen(null);}}>
+              <Ic.New/> New Order
+            </button>
+            <button className={`snav-btn${tab==="kitchen"&&!screen?" on":""}`} onClick={()=>{setTab("kitchen");setScreen(null);}}>
+              <Ic.Kitchen/> Kitchen
+              {kitchenCount>0&&<span className="snav-badge">{kitchenCount}</span>}
+            </button>
+            <button className={`snav-btn${tab==="orders"&&!screen?" on":""}`} onClick={()=>{setTab("orders");setScreen(null);}}>
+              <Ic.Orders/> Orders
+              {readyCount>0&&<span className="snav-badge">{readyCount}</span>}
+            </button>
+            <div style={{height:1,background:"rgba(255,255,255,.1)",margin:"12px 0"}}/>
+            {isAdmin
+              ? <button className="snav-btn" onClick={()=>{setIsAdmin(false);showToast("Admin locked");setScreen(null);}}><Ic.Lock/> Lock Admin</button>
+              : <button className="snav-btn" onClick={()=>setScreen("pin-admin")}><Ic.Admin/> Admin</button>}
+            <button className={`snav-btn${screen==="reports"||screen==="pin-reports"?" on":""}`} onClick={()=>setScreen("pin-reports")}><Ic.Reports/> Reports</button>
+            {isAdmin&&<button className="snav-btn" onClick={()=>setScreen("admin")}><Ic.Admin/> Menu Admin</button>}
+          </div>
+          <div className="sidebar-footer">
+            <button className="sidebar-footer-btn" onClick={()=>{if(window.confirm("Sign out?")) logout();}}><Ic.Logout/> Sign Out</button>
+          </div>
+        </div>
 
-  const Header = ({sub}) => (
+        {/* Main content */}
+        <div className="desktop-main">
+          {/* Left: main screen */}
+          <div style={{flex:1,overflowY:"auto"}}>
+            {tab==="kitchen"&&!screen
+              ? <KitchenPanel orders={activeOrders} orderItems={orderItems} onAdvance={advanceStage} onRefresh={load} desktop/>
+              : renderRight()
+            }
+          </div>
+
+          {/* Right: orders always visible on kitchen/orders tabs */}
+          {(tab==="kitchen"||tab==="orders")&&!screen&&(
+            <OrdersPanel orders={orders} onSelect={handleSelectOrder} desktop/>
+          )}
+          {tab==="orders"&&!screen&&(
+            <div style={{display:"none"}}/>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // ── Mobile Layout ─────────────────────────────────────────────
+  const MobileHeader = ({sub}) => (
     <div className="hdr">
       <div className="hdr-brand"><ObaladeLogo size={38}/><div><div className="hdr-name">Obalade Suya</div><div className="hdr-sub">{sub||"POS · Amsterdam"}</div></div></div>
       {!sub&&<div className="hdr-actions">
-        {isAdmin
-          ? <button className="hdr-btn" onClick={()=>{setIsAdmin(false);showToast("Admin locked");}}>🔒 Lock</button>
-          : <button className="hdr-btn" onClick={()=>setScreen("pin-admin")}>Admin</button>}
+        {isAdmin?<button className="hdr-btn" onClick={()=>{setIsAdmin(false);showToast("Admin locked");}}>🔒 Lock</button>:<button className="hdr-btn" onClick={()=>setScreen("pin-admin")}>Admin</button>}
         <button className="hdr-btn" onClick={()=>setScreen("pin-reports")}>Reports</button>
       </div>}
     </div>
   );
 
-  // ── Routes ────────────────────────────────────────────────────
-  if(screen==="pin-reports") return <div className="app"><style>{S}</style><Header sub="Owner Access"/><PinScreen title="Reports" onSuccess={()=>setScreen("reports")} onCancel={()=>setScreen(null)}/><Toast msg={toast}/></div>;
-  if(screen==="pin-admin")   return <div className="app"><style>{S}</style><Header sub="Admin Access"/><PinScreen title="Admin" onSuccess={()=>{setIsAdmin(true);setScreen(null);showToast("Admin unlocked ✓");}} onCancel={()=>setScreen(null)}/><Toast msg={toast}/></div>;
-  if(screen==="reports")     return <div className="app"><style>{S}</style><Header sub="Owner Reports"/><ReportsScreen orders={orders} orderItems={orderItems} payments={payments} onLock={()=>setScreen(null)}/><Toast msg={toast}/></div>;
-  if(screen==="admin")       return <div className="app"><style>{S}</style><Header sub="Menu Admin"/><AdminScreen menuItems={menuItems} onUpdate={updateMenuItem} onLock={()=>{setScreen(null);setIsAdmin(false);}}/><Toast msg={toast}/></div>;
+  if(screen==="pin-reports") return <div className="mobile-shell"><style>{S}</style><MobileHeader sub="Owner Access"/><PinScreen title="Reports" onSuccess={()=>setScreen("reports")} onCancel={()=>setScreen(null)}/><Toast msg={toast}/></div>;
+  if(screen==="pin-admin")   return <div className="mobile-shell"><style>{S}</style><MobileHeader sub="Admin Access"/><PinScreen title="Admin" onSuccess={()=>{setIsAdmin(true);setScreen(null);showToast("Admin unlocked ✓");}} onCancel={()=>setScreen(null)}/><Toast msg={toast}/></div>;
+  if(screen==="reports")     return <div className="mobile-shell"><style>{S}</style><MobileHeader sub="Reports"/><ReportsScreen orders={orders} orderItems={orderItems} payments={payments} onLock={()=>setScreen(null)}/><Toast msg={toast}/></div>;
+  if(screen==="admin")       return <div className="mobile-shell"><style>{S}</style><MobileHeader sub="Menu Admin"/><AdminScreen menuItems={menuItems} onUpdate={updateMenuItem} onLock={()=>{setScreen(null);setIsAdmin(false);}}/><Toast msg={toast}/></div>;
+  if(screen==="menu")        return <div className="mobile-shell"><style>{S}</style><MobileHeader sub={orderCtx?.type==="dine-in"?`Table ${orderCtx?.ref}`:"Takeaway"}/><MenuScreen menuItems={menuItems} orderType={orderCtx?.type} tableRef={orderCtx?.ref} onSend={createOrder} onBack={()=>setScreen(null)}/><Toast msg={toast}/></div>;
+  if(screen==="edit-order")  return <div className="mobile-shell"><style>{S}</style><MobileHeader sub="Edit Order"/><MenuScreen menuItems={menuItems} orderType={editOrder?.type} tableRef={editOrder?.table_number} existingItems={orderItems.filter(i=>i.order_id===editOrder?.id).map(i=>({...i,menu_item_id:menuItems.find(m=>m.name===i.item_name)?.id}))} onSend={updateOrder} onBack={()=>{setScreen(null);setEditOrder(null);}} editMode/><Toast msg={toast}/></div>;
+  if(screen==="order-detail"&&selectedOrder) return <div className="mobile-shell"><style>{S}</style><MobileHeader sub="Order Detail"/><OrderDetailScreen order={selectedOrder} orderItems={orderItems} isAdmin={isAdmin} onBack={()=>{setScreen(null);setSelectedOrder(null);}} onPay={handlePay} onEdit={handleEdit} onDelete={deleteOrder}/><Toast msg={toast}/></div>;
+  if(screen==="payment"&&payOrder) return <div className="mobile-shell"><style>{S}</style><MobileHeader sub="Payment"/><PaymentScreen order={payOrder} orderItems={orderItems} onConfirm={confirmPayment} onBack={()=>{setScreen("order-detail");setPayOrder(null);}}/><Toast msg={toast}/></div>;
 
-  if(screen==="menu") return (
-    <div className="app"><style>{S}</style><Header sub={orderCtx?.type==="dine-in"?`Table ${orderCtx?.ref}`:"Takeaway"}/>
-      <MenuScreen menuItems={menuItems} orderType={orderCtx?.type} tableRef={orderCtx?.ref} onSend={createOrder} onBack={()=>setScreen(null)}/>
-      <Toast msg={toast}/></div>
-  );
-
-  if(screen==="edit-order") return (
-    <div className="app"><style>{S}</style><Header sub="Edit Order"/>
-      <MenuScreen menuItems={menuItems} orderType={editOrder?.type} tableRef={editOrder?.table_number}
-        existingItems={orderItems.filter(i=>i.order_id===editOrder?.id).map(i=>({...i,menu_item_id:menuItems.find(m=>m.name===i.item_name)?.id}))}
-        onSend={updateOrder} onBack={()=>{setScreen(null);setEditOrder(null);}} editMode={true}/>
-      <Toast msg={toast}/></div>
-  );
-
-  if(screen==="order-detail"&&selectedOrder) return (
-    <div className="app"><style>{S}</style><Header sub="Order Detail"/>
-      <OrderDetailScreen
-        order={selectedOrder} orderItems={orderItems} isAdmin={isAdmin}
-        onBack={()=>{setScreen(null);setSelectedOrder(null);}}
-        onPay={o=>{setPayOrder(o);setScreen("payment");}}
-        onEdit={o=>{setEditOrder(o);setScreen("edit-order");}}
-        onDelete={deleteOrder}
-      />
-      <Toast msg={toast}/></div>
-  );
-
-  if(screen==="payment") return (
-    <div className="app"><style>{S}</style><Header sub="Payment"/>
-      <PaymentScreen order={payOrder} orderItems={orderItems} onConfirm={confirmPayment} onBack={()=>{setScreen("order-detail");setPayOrder(null);}}/>
-      <Toast msg={toast}/></div>
-  );
-
-  // ── Main shell ────────────────────────────────────────────────
   return (
-    <div className="app">
-      <style>{S}</style><Header/><Toast msg={toast}/>
+    <div className="mobile-shell">
+      <style>{S}</style><MobileHeader/><Toast msg={toast}/>
       {!loading&&!menuReady&&<SetupScreen onSeed={seedMenu} seeding={seeding}/>}
       {loading&&<div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",minHeight:"60vh",gap:16}}><ObaladeLogo size={64}/><div style={{color:"var(--muted)",fontSize:14}}>Connecting…</div></div>}
       {!loading&&menuReady&&<>
         {tab==="new"&&<NewOrderScreen onStart={(type,ref)=>{setOrderCtx({type,ref});setScreen("menu");}}/>}
-        {tab==="kitchen"&&<KitchenScreen orders={orders} orderItems={orderItems} onAdvance={advanceStage} onRefresh={load}/>}
-        {tab==="orders"&&<OrdersScreen orders={orders} onSelect={o=>{setSelectedOrder(o);setScreen("order-detail");}}/>}
-        {isAdmin&&tab==="orders"&&(
-          <div style={{position:"fixed",bottom:72,right:16,zIndex:45}}>
-            <button className="btn bp bsm" onClick={()=>setScreen("admin")} style={{boxShadow:"0 4px 16px rgba(26,107,60,.4)"}}>⚙️ Menu Admin</button>
-          </div>
-        )}
+        {tab==="kitchen"&&<KitchenPanel orders={activeOrders} orderItems={orderItems} onAdvance={advanceStage} onRefresh={load}/>}
+        {tab==="orders"&&<OrdersPanel orders={orders} onSelect={handleSelectOrder}/>}
+        {isAdmin&&tab==="orders"&&<div style={{position:"fixed",bottom:72,right:16,zIndex:45}}><button className="btn bp bsm" onClick={()=>setScreen("admin")} style={{boxShadow:"0 4px 16px rgba(26,107,60,.4)"}}>⚙️ Menu Admin</button></div>}
         <nav className="nav">
           <button className={`nt${tab==="new"?" on":""}`} onClick={()=>{setTab("new");setScreen(null);}}><Ic.New/> New Order</button>
-          <button className={`nt${tab==="kitchen"?" on":""}`} onClick={()=>setTab("kitchen")}>
-            <Ic.Kitchen/>{kitchenCount>0&&<span className="ndot">{kitchenCount}</span>}Kitchen
-          </button>
-          <button className={`nt${tab==="orders"?" on":""}`} onClick={()=>setTab("orders")}>
-            <Ic.Orders/>{readyCount>0&&<span className="ndot">{readyCount}</span>}Orders
-          </button>
+          <button className={`nt${tab==="kitchen"?" on":""}`} onClick={()=>setTab("kitchen")}><Ic.Kitchen/>{kitchenCount>0&&<span className="ndot">{kitchenCount}</span>}Kitchen</button>
+          <button className={`nt${tab==="orders"?" on":""}`} onClick={()=>setTab("orders")}><Ic.Orders/>{readyCount>0&&<span className="ndot">{readyCount}</span>}Orders</button>
         </nav>
       </>}
     </div>
