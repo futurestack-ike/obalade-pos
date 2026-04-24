@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 
 const SUPABASE_URL = "https://srcmohssomlkngvdkyxp.supabase.co";
 const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNyY21vaHNzb21sa25ndmRreXhwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY5NTI4MTcsImV4cCI6MjA5MjUyODgxN30.kDrYINdJVzeMR3n6861mAcIbyG55EIygrs2b3_gCWf8";
-const OWNER_PIN = "1234";
+const OWNER_PIN = "110203";
 const MENU_CATEGORIES = ["Suya","Main","Soup","Fried","Standalone","Beans","Sides","Kids","Drinks"];
 const STAGE_LABEL = { "not-started": "Not Started", "busy": "Busy", "ready": "Ready" };
 const STAGE_NEXT  = { "not-started": "busy", "busy": "ready" };
