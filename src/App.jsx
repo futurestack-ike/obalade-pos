@@ -400,15 +400,16 @@ const LoginScreen = ({onLogin}) => {
 // ── PIN Screen ────────────────────────────────────────────────────
 const PinScreen = ({title,onSuccess,onCancel}) => {
   const [pin,setPin]=useState(""); const [err,setErr]=useState(false);
+  const pinLen = OWNER_PIN.length;
   const press = k => {
-    if(pin.length>=4) return;
+    if(pin.length>=pinLen) return;
     const next=pin+k; setPin(next); setErr(false);
-    if(next.length===4){ if(next===OWNER_PIN) onSuccess(); else setTimeout(()=>{setPin("");setErr(true);},300); }
+    if(next.length===pinLen){ if(next===OWNER_PIN) onSuccess(); else setTimeout(()=>{setPin("");setErr(true);},300); }
   };
   return (
     <div className="pg"><div className="pinwrap">
       <div style={{textAlign:"center"}}><div className="sh">{title}</div><div style={{color:"var(--muted)",fontSize:13,marginTop:4}}>Enter 4-digit PIN</div></div>
-      <div className="pindots">{[0,1,2,3].map(i=><div key={i} className={`pindot${pin.length>i?" on":""}`}/>)}</div>
+      <div className="pindots">{Array.from({length:pinLen}).map((_,i)=><div key={i} className={`pindot${pin.length>i?" on":""}`}/>)}</div>
       {err&&<div style={{color:"var(--red)",fontWeight:600,fontSize:14}}>Incorrect PIN</div>}
       <div className="pingrid">
         {[1,2,3,4,5,6,7,8,9].map(n=><button key={n} className="pinkey" onClick={()=>press(String(n))}>{n}</button>)}
