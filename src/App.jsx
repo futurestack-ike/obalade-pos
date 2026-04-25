@@ -594,25 +594,27 @@ const playKitchenSound = () => {
     if (audioCtx.state === "suspended") audioCtx.resume();
     const now = audioCtx.currentTime;
 
-    // Restaurant-style bell: ding ding ding
-    const bell = (freq, start, decay) => {
-      const real = new Float32Array([0, 0, 1, 0, 1, 0.3, 0.1, 0.05]);
-      const imag = new Float32Array(real.length);
-      const wave = audioCtx.createPeriodicWave(real, imag);
+    const ding = (freq, start, vol=0.7) => {
       const o = audioCtx.createOscillator();
       const g = audioCtx.createGain();
+      // Add a bit of harmonics for a real bell feel
+      const real = new Float32Array([0, 1, 0.6, 0.3, 0.1, 0.05]);
+      const imag = new Float32Array(real.length);
+      const wave = audioCtx.createPeriodicWave(real, imag);
       o.setPeriodicWave(wave);
       o.frequency.value = freq;
       o.connect(g); g.connect(audioCtx.destination);
-      g.gain.setValueAtTime(0.6, now + start);
-      g.gain.exponentialRampToValueAtTime(0.001, now + start + decay);
+      // Sharp attack, long natural decay like a real bell
+      g.gain.setValueAtTime(vol, now + start);
+      g.gain.setValueAtTime(vol, now + start + 0.01);
+      g.gain.exponentialRampToValueAtTime(0.001, now + start + 1.8);
       o.start(now + start);
-      o.stop(now + start + decay + 0.1);
+      o.stop(now + start + 2.0);
     };
 
-    bell(1047, 0,    0.8);   // C6
-    bell(1319, 0.25, 0.8);   // E6
-    bell(1568, 0.5,  1.2);   // G6
+    // Classic ding-dong: high then low
+    ding(1400, 0,    0.7);  // ding
+    ding(1050, 0.45, 0.6);  // dong
   } catch(e) { console.error("Sound error:", e); }
 };
 
