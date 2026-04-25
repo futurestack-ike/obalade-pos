@@ -593,21 +593,26 @@ const playKitchenSound = () => {
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     if (audioCtx.state === "suspended") audioCtx.resume();
     const now = audioCtx.currentTime;
-    const beep = (freq, start, dur) => {
+
+    // Restaurant-style bell: ding ding ding
+    const bell = (freq, start, decay) => {
+      const real = new Float32Array([0, 0, 1, 0, 1, 0.3, 0.1, 0.05]);
+      const imag = new Float32Array(real.length);
+      const wave = audioCtx.createPeriodicWave(real, imag);
       const o = audioCtx.createOscillator();
       const g = audioCtx.createGain();
-      o.connect(g); g.connect(audioCtx.destination);
+      o.setPeriodicWave(wave);
       o.frequency.value = freq;
-      o.type = "triangle";
-      g.gain.setValueAtTime(0.001, now + start);
-      g.gain.exponentialRampToValueAtTime(0.5, now + start + 0.02);
-      g.gain.exponentialRampToValueAtTime(0.001, now + start + dur);
+      o.connect(g); g.connect(audioCtx.destination);
+      g.gain.setValueAtTime(0.6, now + start);
+      g.gain.exponentialRampToValueAtTime(0.001, now + start + decay);
       o.start(now + start);
-      o.stop(now + start + dur + 0.05);
+      o.stop(now + start + decay + 0.1);
     };
-    beep(987, 0,    0.18);
-    beep(987, 0.22, 0.18);
-    beep(1318, 0.44, 0.3);
+
+    bell(1047, 0,    0.8);   // C6
+    bell(1319, 0.25, 0.8);   // E6
+    bell(1568, 0.5,  1.2);   // G6
   } catch(e) { console.error("Sound error:", e); }
 };
 
@@ -1090,7 +1095,7 @@ export default function App() {
       if(screen==="reports")     return <ReportsScreen orders={orders} orderItems={orderItems} payments={payments} onLock={()=>setScreen(null)} desktop/>;
       if(screen==="admin")       return <AdminScreen menuItems={menuItems} onUpdate={updateMenuItem} onLock={()=>{setScreen(null);setIsAdmin(false);}} desktop/>;
       if(screen==="menu")        return <MenuScreen menuItems={menuItems} orderType={orderCtx?.type} tableRef={orderCtx?.ref} onSend={createOrder} onBack={()=>setScreen(null)} desktop/>;
-      if(screen==="add-items"&&addItemsOrder) return <MenuScreen menuItems={menuItems} orderType={addItemsOrder?.type} tableRef={addItemsOrder?.table_number} onSend={addItemsToOrder} onBack={()=>{setScreen("order-detail");setAddItemsOrder(null);}} editMode desktop addMode/>;
+      if(screen==="add-items") return <MenuScreen menuItems={menuItems} orderType={addItemsOrder?.type} tableRef={addItemsOrder?.table_number} onSend={addItemsToOrder} onBack={()=>{setScreen(addItemsOrder?"order-detail":null);setAddItemsOrder(null);}} addMode desktop/>;
       if(screen==="edit-order")  return <MenuScreen menuItems={menuItems} orderType={editOrder?.type} tableRef={editOrder?.table_number} existingItems={orderItems.filter(i=>i.order_id===editOrder?.id).map(i=>({...i,menu_item_id:menuItems.find(m=>m.name===i.item_name)?.id}))} onSend={updateOrder} onBack={()=>{setScreen(null);setEditOrder(null);}} editMode desktop/>;
       if(screen==="order-detail"&&selectedOrder) return <OrderDetailScreen order={selectedOrder} orderItems={orderItems} isAdmin={isAdmin} onBack={()=>{setScreen(null);setSelectedOrder(null);}} onPay={handlePay} onEdit={handleEdit} onDelete={deleteOrder} onAddItems={handleAddItems} desktop/>;
       if(screen==="payment"&&payOrder) return <PaymentScreen order={payOrder} orderItems={orderItems} onConfirm={confirmPayment} onBack={()=>{setScreen("order-detail");setPayOrder(null);}} desktop/>;
@@ -1173,7 +1178,7 @@ export default function App() {
   if(screen==="admin")       return <div className="mobile-shell"><style>{S}</style><MobileHeader sub="Menu Admin"/><AdminScreen menuItems={menuItems} onUpdate={updateMenuItem} onLock={()=>{setScreen(null);setIsAdmin(false);}}/><Toast msg={toast}/></div>;
   if(screen==="menu")        return <div className="mobile-shell"><style>{S}</style><MobileHeader sub={orderCtx?.type==="dine-in"?`Table ${orderCtx?.ref}`:"Takeaway"}/><MenuScreen menuItems={menuItems} orderType={orderCtx?.type} tableRef={orderCtx?.ref} onSend={createOrder} onBack={()=>setScreen(null)}/><Toast msg={toast}/></div>;
   if(screen==="edit-order")  return <div className="mobile-shell"><style>{S}</style><MobileHeader sub="Edit Order"/><MenuScreen menuItems={menuItems} orderType={editOrder?.type} tableRef={editOrder?.table_number} existingItems={orderItems.filter(i=>i.order_id===editOrder?.id).map(i=>({...i,menu_item_id:menuItems.find(m=>m.name===i.item_name)?.id}))} onSend={updateOrder} onBack={()=>{setScreen(null);setEditOrder(null);}} editMode/><Toast msg={toast}/></div>;
-  if(screen==="add-items"&&addItemsOrder) return <div className="mobile-shell"><style>{S}</style><MobileHeader sub={`Add to ${orderLabel(addItemsOrder)}`}/><MenuScreen menuItems={menuItems} orderType={addItemsOrder?.type} tableRef={addItemsOrder?.table_number} onSend={addItemsToOrder} onBack={()=>{setScreen("order-detail");setAddItemsOrder(null);}} addMode/><Toast msg={toast}/></div>;
+  if(screen==="add-items") return <div className="mobile-shell"><style>{S}</style><MobileHeader sub={addItemsOrder?`Add to ${orderLabel(addItemsOrder)}`:"Add Items"}/><MenuScreen menuItems={menuItems} orderType={addItemsOrder?.type} tableRef={addItemsOrder?.table_number} onSend={addItemsToOrder} onBack={()=>{setScreen(addItemsOrder?"order-detail":null);setAddItemsOrder(null);}} addMode/><Toast msg={toast}/></div>;
   if(screen==="order-detail"&&selectedOrder) return <div className="mobile-shell"><style>{S}</style><MobileHeader sub="Order Detail"/><OrderDetailScreen order={selectedOrder} orderItems={orderItems} isAdmin={isAdmin} onBack={()=>{setScreen(null);setSelectedOrder(null);}} onPay={handlePay} onEdit={handleEdit} onDelete={deleteOrder} onAddItems={handleAddItems}/><Toast msg={toast}/></div>;
   if(screen==="payment"&&payOrder) return <div className="mobile-shell"><style>{S}</style><MobileHeader sub="Payment"/><PaymentScreen order={payOrder} orderItems={orderItems} onConfirm={confirmPayment} onBack={()=>{setScreen("order-detail");setPayOrder(null);}}/><Toast msg={toast}/></div>;
 
