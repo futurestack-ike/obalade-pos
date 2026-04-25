@@ -579,25 +579,36 @@ const MenuScreen = ({menuItems,orderType,tableRef,onSend,onBack,existingItems=[]
 };
 
 // ── Sound ─────────────────────────────────────────────────────────
+let audioCtx = null;
+
+const unlockAudio = () => {
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === "suspended") audioCtx.resume();
+  } catch(e) {}
+};
+
 const playKitchenSound = () => {
   try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === "suspended") audioCtx.resume();
+    const now = audioCtx.currentTime;
     const beep = (freq, start, dur) => {
-      const o = ctx.createOscillator();
-      const g = ctx.createGain();
-      o.connect(g); g.connect(ctx.destination);
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      o.connect(g); g.connect(audioCtx.destination);
       o.frequency.value = freq;
-      o.type = "sine";
-      g.gain.setValueAtTime(0, ctx.currentTime + start);
-      g.gain.linearRampToValueAtTime(0.4, ctx.currentTime + start + 0.01);
-      g.gain.linearRampToValueAtTime(0, ctx.currentTime + start + dur);
-      o.start(ctx.currentTime + start);
-      o.stop(ctx.currentTime + start + dur + 0.05);
+      o.type = "triangle";
+      g.gain.setValueAtTime(0.001, now + start);
+      g.gain.exponentialRampToValueAtTime(0.5, now + start + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.001, now + start + dur);
+      o.start(now + start);
+      o.stop(now + start + dur + 0.05);
     };
-    beep(880, 0,    0.15);
-    beep(880, 0.2,  0.15);
-    beep(1100, 0.4, 0.25);
-  } catch(e) {}
+    beep(987, 0,    0.18);
+    beep(987, 0.22, 0.18);
+    beep(1318, 0.44, 0.3);
+  } catch(e) { console.error("Sound error:", e); }
 };
 
 // ── Kitchen Panel ─────────────────────────────────────────────────
@@ -605,22 +616,40 @@ const KitchenPanel = ({orders,orderItems,onAdvance,onRefresh,desktop=false}) => 
   const [kitchenMode, setKitchenMode] = useState(() => localStorage.getItem("kitchenMode")==="true");
   const [notifEnabled,setNotifEnabled]=useState(safeNotif.permission()==="granted");
   const enableNotifs=async()=>{const ok=await safeNotif.request();setNotifEnabled(ok);};
-  const prevOrderIds = useRef(new Set(orders.map(o=>o.id)));
+  const prevOrderIds = useRef(null);
 
   const toggleKitchenMode = () => {
     const next = !kitchenMode;
     setKitchenMode(next);
     localStorage.setItem("kitchenMode", String(next));
-    if(next) playKitchenSound();
+    if(next) {
+      unlockAudio(); // must happen inside a user gesture
+      playKitchenSound();
+    }
   };
 
   // Play sound when new orders arrive in kitchen mode
   useEffect(()=>{
-    if(!kitchenMode) return;
+    if(!kitchenMode) {
+      // Always update the ref even when not in kitchen mode
+      prevOrderIds.current = new Set(orders.map(o=>o.id));
+      return;
+    }
+    // First load — just record current IDs, don't play sound
+    if(prevOrderIds.current===null) {
+      prevOrderIds.current = new Set(orders.map(o=>o.id));
+      return;
+    }
     const newOnes = orders.filter(o=>
-      (o.status==="not-started") && !prevOrderIds.current.has(o.id)
+      o.status==="not-started" && !prevOrderIds.current.has(o.id)
     );
-    if(newOnes.length>0) playKitchenSound();
+    if(newOnes.length>0) {
+      if(audioCtx && audioCtx.state==="suspended") {
+        audioCtx.resume().then(()=>playKitchenSound());
+      } else {
+        playKitchenSound();
+      }
+    }
     prevOrderIds.current = new Set(orders.map(o=>o.id));
   },[orders, kitchenMode]);
 
@@ -644,8 +673,8 @@ const KitchenPanel = ({orders,orderItems,onAdvance,onRefresh,desktop=false}) => 
               </button>
             </div>
             <div className="desktop-panel-sub">{grouped.length} active order{grouped.length!==1?"s":""}</div>
-            {kitchenMode&&<div style={{background:"var(--gp)",border:"1px solid var(--g)",borderRadius:10,padding:"8px 14px",fontSize:12,color:"var(--g)",fontWeight:600,marginBottom:16}}>
-              🔊 Sound alerts active — keep this screen open
+            {kitchenMode&&<div style={{background:"var(--gp)",border:"1px solid var(--g)",borderRadius:10,padding:"8px 14px",fontSize:12,color:"var(--g)",fontWeight:600,marginBottom:16,cursor:"pointer"}} onClick={playKitchenSound}>
+              🔊 Sound active — tap here to test · keep screen open
             </div>}
           </div>
         : <><div className="row" style={{marginBottom:4}}>
@@ -660,8 +689,8 @@ const KitchenPanel = ({orders,orderItems,onAdvance,onRefresh,desktop=false}) => 
               <button className="btn bo bsm" onClick={onRefresh}><Ic.Refresh/></button>
             </div>
           </div>
-          {kitchenMode&&<div style={{background:"var(--gp)",border:"1px solid var(--g)",borderRadius:10,padding:"8px 14px",fontSize:12,color:"var(--g)",fontWeight:600,marginBottom:12}}>
-            🔊 Sound active — keep this screen open for alerts
+          {kitchenMode&&<div style={{background:"var(--gp)",border:"1px solid var(--g)",borderRadius:10,padding:"8px 14px",fontSize:12,color:"var(--g)",fontWeight:600,marginBottom:12,cursor:"pointer"}} onClick={playKitchenSound}>
+            🔊 Sound active — tap here to test · keep screen open
           </div>}
           <div className="ss">{grouped.length} active order{grouped.length!==1?"s":""}</div>
         </>
@@ -997,7 +1026,7 @@ export default function App() {
     setLoading(false);
   },[]);
 
-  useEffect(()=>{ if(session){ load(); const t=setInterval(load,15000); return()=>clearInterval(t); } },[session,load]);
+  useEffect(()=>{ if(session){ load(); const t=setInterval(load, 3000); return()=>clearInterval(t); } },[session,load]);
 
   const seedMenu=async()=>{ setSeeding(true); try{await dbPost("menu_items",DEFAULT_MENU);await load();showToast("✓ Menu loaded!");}catch(e){showToast("Seed failed");} setSeeding(false); };
   const createOrder=async(cartItems,total)=>{ try{ const[order]=await dbPost("orders",{type:orderCtx.type,table_number:orderCtx.ref||null,status:"not-started",total}); await dbPost("order_items",cartItems.map(i=>({order_id:order.id,item_name:i.name,category:i.category,quantity:i.quantity,price:Number(i.price),note:i.note||null}))); await load();showToast("✓ Sent to kitchen!");setScreen(null);setTab("kitchen"); }catch(e){showToast("Failed to send order");} };
