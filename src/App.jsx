@@ -633,22 +633,35 @@ const KitchenPanel = ({orders,orderItems,onAdvance,onRefresh,desktop=false}) => 
   return (
     <div className={wrap}>
       {desktop
-        ? <div><div className="desktop-panel-title">Kitchen</div><div className="desktop-panel-sub">{grouped.length} active order{grouped.length!==1?"s":""}</div></div>
+        ? <div>
+            <div className="row" style={{marginBottom:4}}>
+              <div className="desktop-panel-title">Kitchen</div>
+              <button
+                className={`btn bsm ${kitchenMode?"bp":"bo"}`}
+                onClick={toggleKitchenMode}
+              >
+                {kitchenMode?"🔊 Sound ON":"🔇 Sound OFF"}
+              </button>
+            </div>
+            <div className="desktop-panel-sub">{grouped.length} active order{grouped.length!==1?"s":""}</div>
+            {kitchenMode&&<div style={{background:"var(--gp)",border:"1px solid var(--g)",borderRadius:10,padding:"8px 14px",fontSize:12,color:"var(--g)",fontWeight:600,marginBottom:16}}>
+              🔊 Sound alerts active — keep this screen open
+            </div>}
+          </div>
         : <><div className="row" style={{marginBottom:4}}>
             <div className="sh">Kitchen</div>
             <div style={{display:"flex",gap:8}}>
               <button
                 className={`btn bsm ${kitchenMode?"bp":"bo"}`}
                 onClick={toggleKitchenMode}
-                title="Kitchen Mode — plays sound on new orders"
               >
-                {kitchenMode?"🔊 Kitchen Mode ON":"🔇 Kitchen Mode"}
+                {kitchenMode?"🔊 ON":"🔇 Sound"}
               </button>
               <button className="btn bo bsm" onClick={onRefresh}><Ic.Refresh/></button>
             </div>
           </div>
           {kitchenMode&&<div style={{background:"var(--gp)",border:"1px solid var(--g)",borderRadius:10,padding:"8px 14px",fontSize:12,color:"var(--g)",fontWeight:600,marginBottom:12}}>
-            🔊 Sound alerts enabled on this device
+            🔊 Sound active — keep this screen open for alerts
           </div>}
           <div className="ss">{grouped.length} active order{grouped.length!==1?"s":""}</div>
         </>
@@ -992,12 +1005,14 @@ export default function App() {
   const addItemsToOrder = async (cartItems, _total) => {
     try {
       // Create a NEW sub-order for just the added items so kitchen only sees new items
+      const label = addItemsOrder.type==="dine-in"
+        ? `Table ${addItemsOrder.table_number}`
+        : addItemsOrder.table_number||"Takeaway";
       const [subOrder] = await dbPost("orders", {
         type: addItemsOrder.type,
         table_number: addItemsOrder.table_number,
         status: "not-started",
         total: cartItems.reduce((s,i)=>s+Number(i.price)*i.quantity, 0),
-        parent_order_id: addItemsOrder.id,
       });
       await dbPost("order_items", cartItems.map(i=>({
         order_id: subOrder.id,
@@ -1016,7 +1031,7 @@ export default function App() {
       showToast("✓ Items sent to kitchen!");
       setScreen("order-detail");
       setAddItemsOrder(null);
-    } catch(e) { showToast("Failed to add items"); }
+    } catch(e) { console.error(e); showToast("Failed to add items"); }
   };
   const deleteOrder=async id=>{ try{ await dbDelete(`order_items?order_id=eq.${id}`);await dbDelete(`payments?order_id=eq.${id}`);await dbDelete(`orders?id=eq.${id}`); await load();showToast("✓ Order deleted");setSelectedOrder(null);setScreen(null); }catch(e){showToast("Delete failed");} };
   const advanceStage=async(id,next)=>{ try{await dbPatch(`orders?id=eq.${id}`,{status:next});await load();showToast(`✓ ${STAGE_LABEL[next]}`);}catch(e){showToast("Error");} };
