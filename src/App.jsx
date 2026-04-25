@@ -1036,15 +1036,14 @@ export default function App() {
   const seedMenu=async()=>{ setSeeding(true); try{await dbPost("menu_items",DEFAULT_MENU);await load();showToast("✓ Menu loaded!");}catch(e){showToast("Seed failed");} setSeeding(false); };
   const createOrder=async(cartItems,total)=>{ try{ const[order]=await dbPost("orders",{type:orderCtx.type,table_number:orderCtx.ref||null,status:"not-started",total}); await dbPost("order_items",cartItems.map(i=>({order_id:order.id,item_name:i.name,category:i.category,quantity:i.quantity,price:Number(i.price),note:i.note||null}))); await load();showToast("✓ Sent to kitchen!");setScreen(null);setTab("kitchen"); }catch(e){showToast("Failed to send order");} };
   const updateOrder=async(cartItems,total)=>{ try{ await dbDelete(`order_items?order_id=eq.${editOrder.id}`); await dbPost("order_items",cartItems.map(i=>({order_id:editOrder.id,item_name:i.name,category:i.category,quantity:i.quantity,price:Number(i.price),note:i.note||null}))); await dbPatch(`orders?id=eq.${editOrder.id}`,{total}); await load();showToast("✓ Order updated!");setScreen(null);setEditOrder(null);setSelectedOrder(null);setTab("orders"); }catch(e){showToast("Failed to update");} };
+  const addItemsOrderRef = useRef(null);
   const addItemsToOrder = async (cartItems, _total) => {
+    const target = addItemsOrderRef.current;
+    if(!target) { showToast("No order selected"); return; }
     try {
-      // Create a NEW sub-order for just the added items so kitchen only sees new items
-      const label = addItemsOrder.type==="dine-in"
-        ? `Table ${addItemsOrder.table_number}`
-        : addItemsOrder.table_number||"Takeaway";
       const [subOrder] = await dbPost("orders", {
-        type: addItemsOrder.type,
-        table_number: addItemsOrder.table_number,
+        type: target.type,
+        table_number: target.table_number,
         status: "not-started",
         total: cartItems.reduce((s,i)=>s+Number(i.price)*i.quantity, 0),
       });
@@ -1056,15 +1055,16 @@ export default function App() {
         price: Number(i.price),
         note: i.note||null,
       })));
-      // Update parent order total
-      const existing = orderItems.filter(i=>i.order_id===addItemsOrder.id);
+      const existing = orderItems.filter(i=>i.order_id===target.id);
       const existingTotal = existing.reduce((s,i)=>s+Number(i.price)*i.quantity, 0);
       const newTotal = existingTotal + cartItems.reduce((s,i)=>s+Number(i.price)*i.quantity, 0);
-      await dbPatch(`orders?id=eq.${addItemsOrder.id}`, {total: newTotal});
+      await dbPatch(`orders?id=eq.${target.id}`, {total: newTotal});
       await load();
       showToast("✓ Items sent to kitchen!");
-      setScreen("order-detail");
+      setScreen(null);
       setAddItemsOrder(null);
+      addItemsOrderRef.current = null;
+      setTab("orders");
     } catch(e) { console.error(e); showToast("Failed to add items"); }
   };
   const deleteOrder=async id=>{ try{ await dbDelete(`order_items?order_id=eq.${id}`);await dbDelete(`payments?order_id=eq.${id}`);await dbDelete(`orders?id=eq.${id}`); await load();showToast("✓ Order deleted");setSelectedOrder(null);setScreen(null); }catch(e){showToast("Delete failed");} };
@@ -1085,7 +1085,7 @@ export default function App() {
   const handleSelectOrder = o => { setSelectedOrder(o); setScreen("order-detail"); };
   const handlePay = o => { setPayOrder(o); setScreen("payment"); };
   const handleEdit = o => { setEditOrder(o); setScreen("edit-order"); };
-  const handleAddItems = o => { setAddItemsOrder(o); setScreen("add-items"); };
+  const handleAddItems = o => { addItemsOrderRef.current = o; setAddItemsOrder(o); setScreen("add-items"); };
 
   // ── Desktop Layout ────────────────────────────────────────────
   if(isDesktop) {
@@ -1100,7 +1100,7 @@ export default function App() {
       if(screen==="order-detail"&&selectedOrder) return <OrderDetailScreen order={selectedOrder} orderItems={orderItems} isAdmin={isAdmin} onBack={()=>{setScreen(null);setSelectedOrder(null);}} onPay={handlePay} onEdit={handleEdit} onDelete={deleteOrder} onAddItems={handleAddItems} desktop/>;
       if(screen==="payment"&&payOrder) return <PaymentScreen order={payOrder} orderItems={orderItems} onConfirm={confirmPayment} onBack={()=>{setScreen("order-detail");setPayOrder(null);}} desktop/>;
 
-      if(tab==="new") return !menuReady ? <SetupScreen onSeed={seedMenu} seeding={seeding}/> : <NewOrderScreen onStart={(type,ref)=>{setOrderCtx({type,ref});setScreen("menu");}} onAddToExisting={o=>{setAddItemsOrder(o);setScreen("add-items");}} activeOrders={orders.filter(o=>o.status!=="paid")}/>;      return null;
+      if(tab==="new") return !menuReady ? <SetupScreen onSeed={seedMenu} seeding={seeding}/> : <NewOrderScreen onStart={(type,ref)=>{setOrderCtx({type,ref});setScreen("menu");}} onAddToExisting={o=>{addItemsOrderRef.current=o;setAddItemsOrder(o);setScreen("add-items");}} activeOrders={orders.filter(o=>o.status!=="paid")}/>;      return null;
     };
 
     return (
@@ -1188,7 +1188,7 @@ export default function App() {
       {!loading&&!menuReady&&<SetupScreen onSeed={seedMenu} seeding={seeding}/>}
       {loading&&<div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",minHeight:"60vh",gap:16}}><ObaladeLogo size={64}/><div style={{color:"var(--muted)",fontSize:14}}>Connecting…</div></div>}
       {!loading&&menuReady&&<>
-        {tab==="new"&&<NewOrderScreen onStart={(type,ref)=>{setOrderCtx({type,ref});setScreen("menu");}} onAddToExisting={o=>{setAddItemsOrder(o);setScreen("add-items");}} activeOrders={orders.filter(o=>o.status!=="paid")}/>}
+        {tab==="new"&&<NewOrderScreen onStart={(type,ref)=>{setOrderCtx({type,ref});setScreen("menu");}} onAddToExisting={o=>{addItemsOrderRef.current=o;setAddItemsOrder(o);setScreen("add-items");}} activeOrders={orders.filter(o=>o.status!=="paid")}/>}
         {tab==="kitchen"&&<KitchenPanel orders={activeOrders} orderItems={orderItems} onAdvance={advanceStage} onRefresh={load}/>}
         {tab==="orders"&&<OrdersPanel orders={orders} onSelect={handleSelectOrder}/>}
         {isAdmin&&tab==="orders"&&<div style={{position:"fixed",bottom:72,right:16,zIndex:45}}><button className="btn bp bsm" onClick={()=>setScreen("admin")} style={{boxShadow:"0 4px 16px rgba(26,107,60,.4)"}}>⚙️ Menu Admin</button></div>}
