@@ -588,33 +588,47 @@ const unlockAudio = () => {
   } catch(e) {}
 };
 
+const vibrateDevice = () => {
+  try { if (navigator.vibrate) navigator.vibrate([180, 80, 180, 80, 400]); } catch(e) {}
+};
+
 const playKitchenSound = () => {
   try {
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     if (audioCtx.state === "suspended") audioCtx.resume();
     const now = audioCtx.currentTime;
 
-    const ding = (freq, start, vol=0.7) => {
-      const o = audioCtx.createOscillator();
-      const g = audioCtx.createGain();
-      // Add a bit of harmonics for a real bell feel
-      const real = new Float32Array([0, 1, 0.6, 0.3, 0.1, 0.05]);
-      const imag = new Float32Array(real.length);
-      const wave = audioCtx.createPeriodicWave(real, imag);
-      o.setPeriodicWave(wave);
-      o.frequency.value = freq;
-      o.connect(g); g.connect(audioCtx.destination);
-      // Sharp attack, long natural decay like a real bell
-      g.gain.setValueAtTime(vol, now + start);
-      g.gain.setValueAtTime(vol, now + start + 0.01);
-      g.gain.exponentialRampToValueAtTime(0.001, now + start + 1.8);
-      o.start(now + start);
-      o.stop(now + start + 2.0);
+    // Sharp rising chirps: di-di-DING
+    // Square wave for bite that cuts through music + noise
+    // Harmonic layer adds brightness
+    const chirp = (freq, t, vol) => {
+      const o1 = audioCtx.createOscillator();
+      const g1 = audioCtx.createGain();
+      o1.type = "square";
+      o1.frequency.setValueAtTime(freq, now + t);
+      o1.frequency.exponentialRampToValueAtTime(freq * 1.08, now + t + 0.07);
+      g1.gain.setValueAtTime(0.001, now + t);
+      g1.gain.linearRampToValueAtTime(vol, now + t + 0.012);
+      g1.gain.exponentialRampToValueAtTime(0.001, now + t + 0.2);
+      o1.connect(g1); g1.connect(audioCtx.destination);
+      o1.start(now + t); o1.stop(now + t + 0.22);
+
+      const o2 = audioCtx.createOscillator();
+      const g2 = audioCtx.createGain();
+      o2.type = "sine";
+      o2.frequency.setValueAtTime(freq * 2, now + t);
+      g2.gain.setValueAtTime(0.001, now + t);
+      g2.gain.linearRampToValueAtTime(vol * 0.35, now + t + 0.012);
+      g2.gain.exponentialRampToValueAtTime(0.001, now + t + 0.15);
+      o2.connect(g2); g2.connect(audioCtx.destination);
+      o2.start(now + t); o2.stop(now + t + 0.17);
     };
 
-    // Classic ding-dong: high then low
-    ding(1400, 0,    0.7);  // ding
-    ding(1050, 0.45, 0.6);  // dong
+    chirp(880,  0.00, 0.45);  // di  — A5
+    chirp(1100, 0.23, 0.52);  // di  — C#6
+    chirp(1400, 0.46, 0.72);  // DING — F6, loudest
+
+    vibrateDevice();
   } catch(e) { console.error("Sound error:", e); }
 };
 
@@ -744,14 +758,40 @@ const KitchenPanel = ({orders,orderItems,onAdvance,onRefresh,desktop=false}) => 
 
 // ── Orders Panel ──────────────────────────────────────────────────
 const OrdersPanel = ({orders,onSelect,desktop=false}) => {
+  const [soundOn, setSoundOn] = useState(()=>localStorage.getItem("staffSoundMode")==="true");
+
+  const toggleSound = () => {
+    const next = !soundOn;
+    setSoundOn(next);
+    localStorage.setItem("staffSoundMode", String(next));
+    staffSoundMode.current = next;
+    if(next){ unlockAudio(); playKitchenSound(); }
+  };
   const active=orders.filter(o=>o.status!=="paid").sort((a,b)=>new Date(b.created_at)-new Date(a.created_at));
   const done=orders.filter(o=>o.status==="paid").sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)).slice(0,20);
   const wrap = desktop ? "desktop-panel" : "pg";
   return (
     <div className={wrap}>
       {desktop
-        ? <div><div className="desktop-panel-title">Orders</div><div className="desktop-panel-sub">Tap to view details & payment</div></div>
-        : <><div className="sh">Orders</div><div className="ss">Tap to view details</div></>
+        ? <div><div className="desktop-panel-title">Orders</div><div className="desktop-panel-sub">Tap to view details & payment</div>
+            <button className={`btn bsm ${soundOn?"bp":"bo"}`} onClick={toggleSound} style={{marginBottom:12}}>
+              {soundOn?"🔊 Sound ON":"🔇 Sound OFF"}
+            </button>
+            {soundOn&&<div style={{background:"var(--gp)",border:"1px solid var(--g)",borderRadius:10,padding:"8px 14px",fontSize:12,color:"var(--g)",fontWeight:600,marginBottom:16,cursor:"pointer"}} onClick={playKitchenSound}>
+              🔊 Sound active — tap to test · alerts when order is ready
+            </div>}
+          </div>
+        : <><div className="row" style={{marginBottom:4}}>
+            <div className="sh">Orders</div>
+            <button className={`btn bsm ${soundOn?"bp":"bo"}`} onClick={toggleSound}>
+              {soundOn?"🔊 ON":"🔇 Sound"}
+            </button>
+          </div>
+          {soundOn&&<div style={{background:"var(--gp)",border:"1px solid var(--g)",borderRadius:10,padding:"8px 14px",fontSize:12,color:"var(--g)",fontWeight:600,marginBottom:12,cursor:"pointer"}} onClick={playKitchenSound}>
+            🔊 Sound active — tap to test · alerts when order is ready
+          </div>}
+          <div className="ss">Tap to view details</div>
+        </>
       }
       {active.length===0&&done.length===0&&<div className="empty"><div className="emico">📋</div><div style={{fontSize:14}}>No orders yet today</div></div>}
       {active.length>0&&<>
@@ -843,16 +883,84 @@ const OrderDetailScreen = ({order,orderItems,isAdmin,onBack,onPay,onEdit,onDelet
   );
 };
 
+// ── EmailJS receipt sender ────────────────────────────────────────
+const EMAILJS_PUBLIC_KEY  = "YOUR_PUBLIC_KEY";   // ← replace
+const EMAILJS_SERVICE_ID  = "YOUR_SERVICE_ID";   // ← replace
+const EMAILJS_TEMPLATE_ID = "YOUR_TEMPLATE_ID";  // ← replace
+
+const sendReceiptEmail = async ({toEmail, orderLabel, items, total, method, date}) => {
+  // Build items table as plain text for email
+  const itemLines = items.map(i=>
+    `${i.quantity}x ${i.item_name}  €${(Number(i.price)*i.quantity).toFixed(2)}`
+  ).join("\n");
+
+  const params = {
+    to_email:    toEmail,
+    order_label: orderLabel,
+    items_list:  itemLines,
+    total:       `€${Number(total).toFixed(2)}`,
+    method:      method === "cash" ? "Cash" : "Card",
+    date:        date,
+    restaurant:  "Obalade Suya Amsterdam",
+  };
+
+  // Load EmailJS SDK on demand
+  if (!window.emailjs) {
+    await new Promise((resolve, reject) => {
+      const s = document.createElement("script");
+      s.src = "https://cdn.jsdelivr.net/npm/@emailjs/browser@3/dist/email.min.js";
+      s.onload = () => { window.emailjs.init(EMAILJS_PUBLIC_KEY); resolve(); };
+      s.onerror = reject;
+      document.head.appendChild(s);
+    });
+  }
+
+  return window.emailjs.send(EMAILJS_SERVICE_ID, EMAILJS_TEMPLATE_ID, params);
+};
+
 // ── Payment Screen ────────────────────────────────────────────────
 const PaymentScreen = ({order,orderItems,onConfirm,onBack,desktop=false}) => {
-  const [method,setMethod]=useState(null); const [busy,setBusy]=useState(false);
-  const items=orderItems.filter(i=>i.order_id===order.id);
-  const confirm=async()=>{setBusy(true);await onConfirm(order,method);setBusy(false);};
+  const [method,setMethod]     = useState(null);
+  const [busy,setBusy]         = useState(false);
+  const [email,setEmail]       = useState("");
+  const [sendEmail,setSendEmail] = useState(false);
+  const [emailSent,setEmailSent] = useState(null); // null | "ok" | "fail"
+
+  const items = orderItems.filter(i=>i.order_id===order.id);
+
+  const confirm = async () => {
+    setBusy(true);
+    // Confirm payment first
+    await onConfirm(order, method);
+    // Send email receipt if requested
+    if(sendEmail && email.trim()) {
+      try {
+        await sendReceiptEmail({
+          toEmail:    email.trim(),
+          orderLabel: orderLabel(order),
+          items,
+          total:      order.total,
+          method,
+          date:       new Date().toLocaleString("nl-NL", {
+            dateStyle:"long", timeStyle:"short"
+          }),
+        });
+        setEmailSent("ok");
+      } catch(e) {
+        console.error("Email failed:", e);
+        setEmailSent("fail");
+      }
+    }
+    setBusy(false);
+  };
+
   const wrap = desktop ? "desktop-panel" : "pg";
   return (
     <div className={wrap}>
       <button className="btn bo bsm" style={{marginBottom:16}} onClick={onBack}><Ic.Back/> Back</button>
       <div className="sh">Payment</div><div className="ss">{orderLabel(order)}</div>
+
+      {/* Order summary */}
       <div className="card" style={{padding:16,marginBottom:16}}>
         {items.map(i=>(
           <div key={i.id} className="row" style={{padding:"10px 0",borderBottom:"1px solid var(--border)"}}>
@@ -865,12 +973,51 @@ const PaymentScreen = ({order,orderItems,onConfirm,onBack,desktop=false}) => {
           <span style={{fontFamily:"'Playfair Display',serif",fontWeight:900,fontSize:26,color:"var(--g)"}}>€{Number(order.total).toFixed(2)}</span>
         </div>
       </div>
+
+      {/* Payment method */}
       <div style={{fontWeight:700,marginBottom:12}}>Payment method</div>
       <div className="pmethods">
         <div className={`ptile${method==="cash"?" on":""}`} onClick={()=>setMethod("cash")}><Ic.Cash/> Cash</div>
         <div className={`ptile${method==="card"?" on":""}`} onClick={()=>setMethod("card")}><Ic.Card/> Card</div>
       </div>
-      <button className="btn bp bw" disabled={!method||busy} onClick={confirm}>
+
+      {/* Email receipt toggle */}
+      <div className="card" style={{padding:16,marginBottom:16}}>
+        <div className="row" style={{marginBottom: sendEmail ? 12 : 0}}>
+          <div style={{display:"flex",alignItems:"center",gap:10}}>
+            <span style={{fontSize:18}}>📧</span>
+            <div>
+              <div style={{fontSize:14,fontWeight:600}}>Send receipt by email</div>
+              <div style={{fontSize:11,color:"var(--muted)"}}>Optional — skip if not needed</div>
+            </div>
+          </div>
+          <label className="tog">
+            <input type="checkbox" checked={sendEmail} onChange={e=>setSendEmail(e.target.checked)}/>
+            <span className="tsl"/>
+          </label>
+        </div>
+        {sendEmail && (
+          <input
+            className="inp"
+            type="email"
+            placeholder="customer@email.com"
+            value={email}
+            onChange={e=>setEmail(e.target.value)}
+            style={{marginBottom:0}}
+            autoFocus
+          />
+        )}
+      </div>
+
+      {/* Email status feedback */}
+      {emailSent==="ok"&&<div style={{background:"var(--gp)",border:"1px solid var(--g)",borderRadius:10,padding:"10px 14px",fontSize:13,color:"var(--g)",fontWeight:600,marginBottom:12}}>✓ Receipt sent to {email}</div>}
+      {emailSent==="fail"&&<div style={{background:"var(--redf)",border:"1px solid var(--red)",borderRadius:10,padding:"10px 14px",fontSize:13,color:"var(--red)",fontWeight:600,marginBottom:12}}>⚠️ Email failed — payment still confirmed</div>}
+
+      <button
+        className="btn bp bw"
+        disabled={!method||busy||(sendEmail&&!email.trim())}
+        onClick={confirm}
+      >
         <Ic.Check/> {busy?"Processing…":`Confirm — €${Number(order.total).toFixed(2)}`}
       </button>
     </div>
@@ -976,6 +1123,7 @@ export default function App() {
   const [toast,setToast]           = useState("");
 
   const prevReadyIds = useRef(new Set());
+  const staffSoundMode = useRef(localStorage.getItem("staffSoundMode")==="true");
   const showToast = m => { setToast(m); setTimeout(()=>setToast(""),2500); };
 
   // Responsive detection
@@ -1024,6 +1172,14 @@ export default function App() {
       newOrders.filter(ord=>ord.status==="ready").forEach(ord=>{
         if(!prevReadyIds.current.has(ord.id)){
           safeNotif.send("🍽️ Order Ready!",`${orderLabel(ord)} is ready for collection`);
+          // Play sound + vibrate for staff if sound mode is on
+          if(staffSoundMode.current){
+            if(audioCtx && audioCtx.state==="suspended"){
+              audioCtx.resume().then(()=>playKitchenSound());
+            } else {
+              playKitchenSound();
+            }
+          }
           prevReadyIds.current.add(ord.id);
         }
       });
