@@ -592,41 +592,30 @@ const vibrateDevice = (pattern=[180,80,180,80,400]) => {
   try { if (navigator.vibrate) navigator.vibrate(pattern); } catch(e) {}
 };
 
-// Kitchen sound — sharp rising chirps: di-di-DING
-// Cuts through background noise and music
+// Kitchen sound — same warm DONG-dong chime as ready sound
 const playKitchenSound = () => {
   try {
     if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     if (audioCtx.state === "suspended") audioCtx.resume();
     const now = audioCtx.currentTime;
 
-    const chirp = (freq, t, vol) => {
-      const o1 = audioCtx.createOscillator();
-      const g1 = audioCtx.createGain();
-      o1.type = "square";
-      o1.frequency.setValueAtTime(freq, now + t);
-      o1.frequency.exponentialRampToValueAtTime(freq * 1.08, now + t + 0.07);
-      g1.gain.setValueAtTime(0.001, now + t);
-      g1.gain.linearRampToValueAtTime(vol, now + t + 0.012);
-      g1.gain.exponentialRampToValueAtTime(0.001, now + t + 0.2);
-      o1.connect(g1); g1.connect(audioCtx.destination);
-      o1.start(now + t); o1.stop(now + t + 0.22);
-
-      const o2 = audioCtx.createOscillator();
-      const g2 = audioCtx.createGain();
-      o2.type = "sine";
-      o2.frequency.setValueAtTime(freq * 2, now + t);
-      g2.gain.setValueAtTime(0.001, now + t);
-      g2.gain.linearRampToValueAtTime(vol * 0.35, now + t + 0.012);
-      g2.gain.exponentialRampToValueAtTime(0.001, now + t + 0.15);
-      o2.connect(g2); g2.connect(audioCtx.destination);
-      o2.start(now + t); o2.stop(now + t + 0.17);
+    const chime = (freq, t, vol, decay) => {
+      const real = new Float32Array([0, 1, 0.5, 0.25, 0.1]);
+      const imag = new Float32Array(real.length);
+      const wave = audioCtx.createPeriodicWave(real, imag);
+      const o = audioCtx.createOscillator();
+      const g = audioCtx.createGain();
+      o.setPeriodicWave(wave);
+      o.frequency.value = freq;
+      g.gain.setValueAtTime(vol, now + t);
+      g.gain.exponentialRampToValueAtTime(0.001, now + t + decay);
+      o.connect(g); g.connect(audioCtx.destination);
+      o.start(now + t); o.stop(now + t + decay + 0.05);
     };
 
-    chirp(880,  0.00, 0.45);
-    chirp(1100, 0.23, 0.52);
-    chirp(1400, 0.46, 0.72);
-    vibrateDevice([180, 80, 180, 80, 400]);
+    chime(1318, 0.00, 0.65, 1.2);  // E6 — main chime
+    chime(1047, 0.28, 0.50, 1.0);  // C6 — resolution
+    vibrateDevice([300]);
   } catch(e) { console.error("Sound error:", e); }
 };
 
