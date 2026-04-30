@@ -1110,18 +1110,36 @@ const ReportsScreen = ({orders,orderItems,payments,onLock,desktop=false}) => {
 };
 
 // ── Admin Screen ──────────────────────────────────────────────────
-const AdminScreen = ({menuItems,onUpdate,onLock,desktop=false}) => {
+const AdminScreen = ({menuItems,onUpdate,onLock,onSync,desktop=false}) => {
   const adminCategories = getCategories(menuItems);
   const [cat,setCat]=useState(null); const [prices,setPrices]=useState({}); const [saved,setSaved]=useState({});
+  const [syncing,setSyncing]=useState(false);
   const activeCat = (cat && adminCategories.includes(cat)) ? cat : (adminCategories[0]||"");
   const items=menuItems.filter(i=>i.category===activeCat);
   const savePrice=async item=>{const v=parseFloat(prices[item.id]);if(isNaN(v))return;await onUpdate(item.id,{price:v});setSaved(s=>({...s,[item.id]:true}));setTimeout(()=>setSaved(s=>({...s,[item.id]:false})),1500);setPrices(p=>{const n={...p};delete n[item.id];return n;});};
+
+  const handleSync = async () => {
+    setSyncing(true);
+    await onSync();
+    setSyncing(false);
+  };
+
   const wrap = desktop ? "desktop-panel" : "pg";
   return (
     <div className={wrap}>
-      <div className="row" style={{marginBottom:20}}>
+      <div className="row" style={{marginBottom:12}}>
         <div>{desktop?<div className="desktop-panel-title">Menu Admin</div>:<div className="sh">Menu Admin</div>}<div style={{color:"var(--muted)",fontSize:13,marginTop:2}}>Edit prices & availability</div></div>
         <button className="btn bo bsm" onClick={onLock}><Ic.Lock/> Lock</button>
+      </div>
+      {/* Sync button */}
+      <div style={{background:"var(--gp)",border:"1px solid var(--g)",borderRadius:12,padding:"14px 16px",marginBottom:20,display:"flex",alignItems:"center",justifyContent:"space-between",gap:12}}>
+        <div>
+          <div style={{fontSize:13,fontWeight:700,color:"var(--g)"}}>🔄 Sync menu from app</div>
+          <div style={{fontSize:11,color:"var(--muted)",marginTop:2}}>Adds any new items to Supabase. Won't delete or overwrite existing items.</div>
+        </div>
+        <button className="btn bp bsm" onClick={handleSync} disabled={syncing} style={{flexShrink:0}}>
+          {syncing?"Syncing…":"Sync now"}
+        </button>
       </div>
       <div className="cats" style={{marginBottom:20}}>{adminCategories.map(c=><div key={c} className={`cp${activeCat===c?" on":""}`} onClick={()=>setCat(c)}>{c}</div>)}</div>
       {items.map(item=>(
@@ -1236,10 +1254,8 @@ export default function App() {
   const seedMenu=async()=>{
     setSeeding(true);
     try {
-      // Get existing items from Supabase
       const existing = await dbGet("menu_items?select=name");
       const existingNames = new Set((existing||[]).map(i=>i.name));
-      // Only insert items not already in Supabase
       const toInsert = DEFAULT_MENU.filter(i=>!existingNames.has(i.name));
       if(toInsert.length>0){
         await dbPost("menu_items", toInsert);
@@ -1250,6 +1266,21 @@ export default function App() {
       await load();
     } catch(e){ showToast("Seed failed"); }
     setSeeding(false);
+  };
+
+  const syncMenu=async()=>{
+    try {
+      const existing = await dbGet("menu_items?select=name");
+      const existingNames = new Set((existing||[]).map(i=>i.name));
+      const toInsert = DEFAULT_MENU.filter(i=>!existingNames.has(i.name));
+      if(toInsert.length>0){
+        await dbPost("menu_items", toInsert);
+        await load();
+        showToast(`✓ Synced! Added ${toInsert.length} new item${toInsert.length!==1?"s":""}`);
+      } else {
+        showToast("✓ Everything already up to date");
+      }
+    } catch(e){ showToast("Sync failed"); }
   };
   const createOrder=async(cartItems,total)=>{ try{ const[order]=await dbPost("orders",{type:orderCtx.type,table_number:orderCtx.ref||null,status:"not-started",total}); await dbPost("order_items",cartItems.map(i=>({order_id:order.id,item_name:i.name,category:i.category,quantity:i.quantity,price:Number(i.price),note:i.note||null}))); await load();showToast("✓ Sent to kitchen!");setScreen(null);setTab("kitchen"); }catch(e){showToast("Failed to send order");} };
   const updateOrder=async(cartItems,total)=>{ try{ await dbDelete(`order_items?order_id=eq.${editOrder.id}`); await dbPost("order_items",cartItems.map(i=>({order_id:editOrder.id,item_name:i.name,category:i.category,quantity:i.quantity,price:Number(i.price),note:i.note||null}))); await dbPatch(`orders?id=eq.${editOrder.id}`,{total}); await load();showToast("✓ Order updated!");setScreen(null);setEditOrder(null);setSelectedOrder(null);setTab("orders"); }catch(e){showToast("Failed to update");} };
@@ -1310,7 +1341,7 @@ export default function App() {
       if(screen==="pin-reports") return <PinScreen title="Reports" onSuccess={()=>setScreen("reports")} onCancel={()=>setScreen(null)}/>;
       if(screen==="pin-admin")   return <PinScreen title="Admin" onSuccess={()=>{setIsAdmin(true);setScreen(null);showToast("Admin unlocked ✓");}} onCancel={()=>setScreen(null)}/>;
       if(screen==="reports")     return <ReportsScreen orders={orders} orderItems={orderItems} payments={payments} onLock={()=>setScreen(null)} desktop/>;
-      if(screen==="admin")       return <AdminScreen menuItems={menuItems} onUpdate={updateMenuItem} onLock={()=>{setScreen(null);setIsAdmin(false);}} desktop/>;
+      if(screen==="admin")       return <AdminScreen menuItems={menuItems} onUpdate={updateMenuItem} onLock={()=>{setScreen(null);setIsAdmin(false);}} onSync={syncMenu} desktop/>;
       if(screen==="menu")        return <MenuScreen menuItems={menuItems} orderType={orderCtx?.type} tableRef={orderCtx?.ref} onSend={createOrder} onBack={()=>setScreen(null)} desktop/>;
       if(screen==="add-items") return <MenuScreen menuItems={menuItems} orderType={addItemsOrder?.type} tableRef={addItemsOrder?.table_number} onSend={addItemsToOrder} onBack={()=>{setScreen(addItemsOrder?"order-detail":null);setAddItemsOrder(null);}} addMode desktop/>;
       if(screen==="edit-order")  return <MenuScreen menuItems={menuItems} orderType={editOrder?.type} tableRef={editOrder?.table_number} existingItems={orderItems.filter(i=>i.order_id===editOrder?.id).map(i=>({...i,menu_item_id:menuItems.find(m=>m.name===i.item_name)?.id}))} onSend={updateOrder} onBack={()=>{setScreen(null);setEditOrder(null);}} editMode desktop/>;
@@ -1392,7 +1423,7 @@ export default function App() {
   if(screen==="pin-reports") return <div className="mobile-shell"><style>{S}</style><MobileHeader sub="Owner Access"/><PinScreen title="Reports" onSuccess={()=>setScreen("reports")} onCancel={()=>setScreen(null)}/><Toast msg={toast}/></div>;
   if(screen==="pin-admin")   return <div className="mobile-shell"><style>{S}</style><MobileHeader sub="Admin Access"/><PinScreen title="Admin" onSuccess={()=>{setIsAdmin(true);setScreen(null);showToast("Admin unlocked ✓");}} onCancel={()=>setScreen(null)}/><Toast msg={toast}/></div>;
   if(screen==="reports")     return <div className="mobile-shell"><style>{S}</style><MobileHeader sub="Reports"/><ReportsScreen orders={orders} orderItems={orderItems} payments={payments} onLock={()=>setScreen(null)}/><Toast msg={toast}/></div>;
-  if(screen==="admin")       return <div className="mobile-shell"><style>{S}</style><MobileHeader sub="Menu Admin"/><AdminScreen menuItems={menuItems} onUpdate={updateMenuItem} onLock={()=>{setScreen(null);setIsAdmin(false);}}/><Toast msg={toast}/></div>;
+  if(screen==="admin")       return <div className="mobile-shell"><style>{S}</style><MobileHeader sub="Menu Admin"/><AdminScreen menuItems={menuItems} onUpdate={updateMenuItem} onLock={()=>{setScreen(null);setIsAdmin(false);}} onSync={syncMenu}/><Toast msg={toast}/></div>;
   if(screen==="menu")        return <div className="mobile-shell"><style>{S}</style><MobileHeader sub={orderCtx?.type==="dine-in"?`Table ${orderCtx?.ref}`:"Takeaway"}/><MenuScreen menuItems={menuItems} orderType={orderCtx?.type} tableRef={orderCtx?.ref} onSend={createOrder} onBack={()=>setScreen(null)}/><Toast msg={toast}/></div>;
   if(screen==="edit-order")  return <div className="mobile-shell"><style>{S}</style><MobileHeader sub="Edit Order"/><MenuScreen menuItems={menuItems} orderType={editOrder?.type} tableRef={editOrder?.table_number} existingItems={orderItems.filter(i=>i.order_id===editOrder?.id).map(i=>({...i,menu_item_id:menuItems.find(m=>m.name===i.item_name)?.id}))} onSend={updateOrder} onBack={()=>{setScreen(null);setEditOrder(null);}} editMode/><Toast msg={toast}/></div>;
   if(screen==="add-items") return <div className="mobile-shell"><style>{S}</style><MobileHeader sub={addItemsOrder?`Add to ${orderLabel(addItemsOrder)}`:"Add Items"}/><MenuScreen menuItems={menuItems} orderType={addItemsOrder?.type} tableRef={addItemsOrder?.table_number} onSend={addItemsToOrder} onBack={()=>{setScreen(addItemsOrder?"order-detail":null);setAddItemsOrder(null);}} addMode/><Toast msg={toast}/></div>;
