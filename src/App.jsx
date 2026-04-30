@@ -3,7 +3,16 @@ import { useState, useEffect, useCallback, useRef } from "react";
 const SUPABASE_URL = "https://srcmohssomlkngvdkyxp.supabase.co";
 const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNyY21vaHNzb21sa25ndmRreXhwIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY5NTI4MTcsImV4cCI6MjA5MjUyODgxN30.kDrYINdJVzeMR3n6861mAcIbyG55EIygrs2b3_gCWf8";
 const OWNER_PIN = "110203";
-const MENU_CATEGORIES = ["Suya","Main","Soup","Fried","Standalone","Beans","Sides","Kids","Drinks"];
+// Category display order — app reads from Supabase but shows in this order
+const MENU_CATEGORIES = ["Suya","Main","Soup","Fried","Standalone","Beans","Sides","Kids","Extra Meals","Drinks"];
+// Helper: get ordered categories from loaded menu items
+const getCategories = (items) => {
+  const inMenu = new Set(items.map(i=>i.category));
+  const ordered = MENU_CATEGORIES.filter(c=>inMenu.has(c));
+  // Add any categories in Supabase not in our list (future-proofing)
+  items.forEach(i=>{ if(!ordered.includes(i.category)) ordered.push(i.category); });
+  return ordered;
+};
 const STAGE_LABEL = { "not-started": "Not Started", "busy": "Busy", "ready": "Ready" };
 const STAGE_NEXT  = { "not-started": "busy", "busy": "ready" };
 const STAGE_BTN   = { "not-started": "Start Cooking →", "busy": "Mark Ready ✓" };
@@ -11,9 +20,11 @@ const STAGE_COLOR = { "not-started": "#c0392b", "busy": "#c9922a", "ready": "#1a
 const STAGE_BG    = { "not-started": "#fdecea", "busy": "#fff8e6", "ready": "#eaf5ef" };
 
 const DEFAULT_MENU = [
+  // ── Suya ──
   { name: "Chicken Suya", category: "Suya", price: 0, available: true },
   { name: "Beef Suya", category: "Suya", price: 0, available: true },
   { name: "Roasted and Smoked Fish", category: "Suya", price: 0, available: true },
+  // ── Main ──
   { name: "Amala", category: "Main", price: 0, available: true },
   { name: "Attiekke with Fish", category: "Main", price: 0, available: true },
   { name: "Griesmeel / Semolina", category: "Main", price: 0, available: true },
@@ -23,6 +34,7 @@ const DEFAULT_MENU = [
   { name: "Jollof Rice", category: "Main", price: 0, available: true },
   { name: "Fried Rice", category: "Main", price: 0, available: true },
   { name: "White Rice", category: "Main", price: 0, available: true },
+  // ── Soup ──
   { name: "Banga", category: "Soup", price: 0, available: true },
   { name: "Seafood Okra", category: "Soup", price: 0, available: true },
   { name: "Eggs Sauce", category: "Soup", price: 0, available: true },
@@ -42,12 +54,15 @@ const DEFAULT_MENU = [
   { name: "Goat Pepper Soup", category: "Soup", price: 0, available: true },
   { name: "Nkwobi", category: "Soup", price: 0, available: true },
   { name: "Catfish Pepper Soup", category: "Soup", price: 0, available: true },
+  // ── Fried ──
   { name: "Fried Fish with Plantain", category: "Fried", price: 0, available: true },
   { name: "Mackerel Fried", category: "Fried", price: 0, available: true },
   { name: "Normal Fried Tilapia", category: "Fried", price: 0, available: true },
   { name: "Merluza Fish per Piece", category: "Fried", price: 0, available: true },
+  // ── Standalone ──
   { name: "Asoro Yam Porridge", category: "Standalone", price: 0, available: true },
   { name: "Gizdodo Gizzard Plantain", category: "Standalone", price: 0, available: true },
+  // ── Beans ──
   { name: "Normal Beans with Meat/Chicken", category: "Beans", price: 0, available: true },
   { name: "Jollof Beans", category: "Beans", price: 0, available: true },
   { name: "Normal Beans", category: "Beans", price: 0, available: true },
@@ -55,6 +70,7 @@ const DEFAULT_MENU = [
   { name: "Normal Beans with Fried Yam/Plantain", category: "Beans", price: 0, available: true },
   { name: "Plantain with Jollof Beans", category: "Beans", price: 0, available: true },
   { name: "Plantain with Normal Beans", category: "Beans", price: 0, available: true },
+  // ── Sides ──
   { name: "Small Fried Plantain", category: "Sides", price: 0, available: true },
   { name: "Big Fried Plantain", category: "Sides", price: 0, available: true },
   { name: "Big Fried Yam", category: "Sides", price: 0, available: true },
@@ -62,10 +78,14 @@ const DEFAULT_MENU = [
   { name: "Fried Goat Meat", category: "Sides", price: 0, available: true },
   { name: "Extra Assorted Meat", category: "Sides", price: 0, available: true },
   { name: "Extra Stew", category: "Sides", price: 0, available: true },
+  // ── Kids ──
   { name: "Patat (Fries) with Nuggets/Frikandel", category: "Kids", price: 0, available: true },
   { name: "Rice with Plantain and Chicken/Beef", category: "Kids", price: 0, available: true },
   { name: "Rice with Chicken/Beef", category: "Kids", price: 0, available: true },
-  // DRINKS - Non Alcoholic
+  // ── Extra Meals ──
+  { name: "All Swallow Extras", category: "Extra Meals", price: 10.00, available: true },
+  { name: "All Rice Extras", category: "Extra Meals", price: 12.50, available: true },
+  // ── Drinks — Non Alcoholic ──
   { name: "Water", category: "Drinks", price: 3.50, available: true },
   { name: "Cola", category: "Drinks", price: 4.0, available: true },
   { name: "Fanta", category: "Drinks", price: 4.0, available: true },
@@ -81,27 +101,27 @@ const DEFAULT_MENU = [
   { name: "Desperados", category: "Drinks", price: 6.0, available: true },
   { name: "Guinness", category: "Drinks", price: 6.0, available: true },
   { name: "Heineken", category: "Drinks", price: 4.0, available: true },
-  // Wine
+  // ── Drinks — Wine ──
   { name: "Red Wine 75cl", category: "Drinks", price: 20.0, available: true },
   { name: "White Wine 75cl", category: "Drinks", price: 20.0, available: true },
   { name: "Red Wine small 250ml", category: "Drinks", price: 7.0, available: true },
   { name: "White Wine small 250ml", category: "Drinks", price: 7.0, available: true },
-  // Champagne
+  // ── Drinks — Champagne ──
   { name: "Moet (BRUT)", category: "Drinks", price: 100.0, available: true },
   { name: "Moet (NECTAR IMPERIAL ROSE)", category: "Drinks", price: 150.0, available: true },
   { name: "Moet (NECTAR ROSE)", category: "Drinks", price: 100.0, available: true },
   { name: "Moet (ICE)", category: "Drinks", price: 120.0, available: true },
   { name: "Veuve Clicquot", category: "Drinks", price: 120.0, available: true },
-  // Whisky
+  // ── Drinks — Whisky ──
   { name: "Hennessy 70CL", category: "Drinks", price: 100.0, available: true },
   { name: "Jack Daniels 70CL", category: "Drinks", price: 80.0, available: true },
   { name: "Black Label 70CL", category: "Drinks", price: 80.0, available: true },
   { name: "Gold Label", category: "Drinks", price: 100.0, available: true },
-  // Vodka
+  // ── Drinks — Vodka ──
   { name: "Smirnoff 70CL", category: "Drinks", price: 50.0, available: true },
   { name: "Absolut", category: "Drinks", price: 80.0, available: true },
   { name: "Ciroc", category: "Drinks", price: 80.0, available: true },
-  // Shots
+  // ── Drinks — Shots ──
   { name: "Malibu (shot)", category: "Drinks", price: 5.0, available: true },
   { name: "Bacardi (shot)", category: "Drinks", price: 5.0, available: true },
   { name: "Smirnoff (shot)", category: "Drinks", price: 5.0, available: true },
@@ -516,12 +536,14 @@ const MenuScreen = ({menuItems,orderType,tableRef,onSend,onBack,existingItems=[]
   const initCart=()=>{const c={};existingItems.forEach(i=>{c[i.menu_item_id||i.id]=i.quantity;});return c;};
   const initNotes=()=>{const n={};existingItems.forEach(i=>{if(i.note)n[i.menu_item_id||i.id]=i.note;});return n;};
   const [cart,setCart]=useState(initCart);
-  const [cat,setCat]=useState(MENU_CATEGORIES[0]);
+  const [cat,setCat]=useState(null);
+  const categories = getCategories(menuItems);
+  const activeCat = (cat && categories.includes(cat)) ? cat : (categories[0]||"");
   const [noteItem,setNoteItem]=useState(null);
   const [noteText,setNoteText]=useState("");
   const [notes,setNotes]=useState(initNotes);
   const [sending,setSending]=useState(false);
-  const catItems=menuItems.filter(i=>i.available&&i.category===cat);
+  const catItems=menuItems.filter(i=>i.available&&i.category===activeCat);
   const qty=id=>cart[id]||0;
   const add=item=>setCart(c=>({...c,[item.id]:(c[item.id]||0)+1}));
   const rmv=item=>setCart(c=>{const n={...c};n[item.id]>1?n[item.id]--:delete n[item.id];return n;});
@@ -539,7 +561,7 @@ const MenuScreen = ({menuItems,orderType,tableRef,onSend,onBack,existingItems=[]
           {!editMode&&<div style={{fontSize:11,color:"var(--muted)",textTransform:"capitalize"}}>{orderType}</div>}
         </div>
       </div>
-      <div className="cats">{MENU_CATEGORIES.map(c=><div key={c} className={`cp${cat===c?" on":""}`} onClick={()=>setCat(c)}>{c}</div>)}</div>
+      <div className="cats">{categories.map(c=><div key={c} className={`cp${activeCat===c?" on":""}`} onClick={()=>setCat(c)}>{c}</div>)}</div>
       {catItems.length===0&&<div className="empty"><div className="emico">🍽️</div><div style={{fontSize:14}}>No items</div></div>}
       {catItems.map(item=>(
         <div key={item.id} className="mi">
@@ -1089,8 +1111,10 @@ const ReportsScreen = ({orders,orderItems,payments,onLock,desktop=false}) => {
 
 // ── Admin Screen ──────────────────────────────────────────────────
 const AdminScreen = ({menuItems,onUpdate,onLock,desktop=false}) => {
-  const [cat,setCat]=useState(MENU_CATEGORIES[0]); const [prices,setPrices]=useState({}); const [saved,setSaved]=useState({});
-  const items=menuItems.filter(i=>i.category===cat);
+  const adminCategories = getCategories(menuItems);
+  const [cat,setCat]=useState(null); const [prices,setPrices]=useState({}); const [saved,setSaved]=useState({});
+  const activeCat = (cat && adminCategories.includes(cat)) ? cat : (adminCategories[0]||"");
+  const items=menuItems.filter(i=>i.category===activeCat);
   const savePrice=async item=>{const v=parseFloat(prices[item.id]);if(isNaN(v))return;await onUpdate(item.id,{price:v});setSaved(s=>({...s,[item.id]:true}));setTimeout(()=>setSaved(s=>({...s,[item.id]:false})),1500);setPrices(p=>{const n={...p};delete n[item.id];return n;});};
   const wrap = desktop ? "desktop-panel" : "pg";
   return (
@@ -1099,7 +1123,7 @@ const AdminScreen = ({menuItems,onUpdate,onLock,desktop=false}) => {
         <div>{desktop?<div className="desktop-panel-title">Menu Admin</div>:<div className="sh">Menu Admin</div>}<div style={{color:"var(--muted)",fontSize:13,marginTop:2}}>Edit prices & availability</div></div>
         <button className="btn bo bsm" onClick={onLock}><Ic.Lock/> Lock</button>
       </div>
-      <div className="cats" style={{marginBottom:20}}>{MENU_CATEGORIES.map(c=><div key={c} className={`cp${cat===c?" on":""}`} onClick={()=>setCat(c)}>{c}</div>)}</div>
+      <div className="cats" style={{marginBottom:20}}>{adminCategories.map(c=><div key={c} className={`cp${activeCat===c?" on":""}`} onClick={()=>setCat(c)}>{c}</div>)}</div>
       {items.map(item=>(
         <div key={item.id} className="ai">
           <label className="tog"><input type="checkbox" checked={!!item.available} onChange={()=>onUpdate(item.id,{available:!item.available})}/><span className="tsl"/></label>
@@ -1209,7 +1233,24 @@ export default function App() {
 
   useEffect(()=>{ if(session){ load(); const t=setInterval(load, 3000); return()=>clearInterval(t); } },[session,load]);
 
-  const seedMenu=async()=>{ setSeeding(true); try{await dbPost("menu_items",DEFAULT_MENU);await load();showToast("✓ Menu loaded!");}catch(e){showToast("Seed failed");} setSeeding(false); };
+  const seedMenu=async()=>{
+    setSeeding(true);
+    try {
+      // Get existing items from Supabase
+      const existing = await dbGet("menu_items?select=name");
+      const existingNames = new Set((existing||[]).map(i=>i.name));
+      // Only insert items not already in Supabase
+      const toInsert = DEFAULT_MENU.filter(i=>!existingNames.has(i.name));
+      if(toInsert.length>0){
+        await dbPost("menu_items", toInsert);
+        showToast(`✓ Added ${toInsert.length} new items!`);
+      } else {
+        showToast("✓ Menu already up to date");
+      }
+      await load();
+    } catch(e){ showToast("Seed failed"); }
+    setSeeding(false);
+  };
   const createOrder=async(cartItems,total)=>{ try{ const[order]=await dbPost("orders",{type:orderCtx.type,table_number:orderCtx.ref||null,status:"not-started",total}); await dbPost("order_items",cartItems.map(i=>({order_id:order.id,item_name:i.name,category:i.category,quantity:i.quantity,price:Number(i.price),note:i.note||null}))); await load();showToast("✓ Sent to kitchen!");setScreen(null);setTab("kitchen"); }catch(e){showToast("Failed to send order");} };
   const updateOrder=async(cartItems,total)=>{ try{ await dbDelete(`order_items?order_id=eq.${editOrder.id}`); await dbPost("order_items",cartItems.map(i=>({order_id:editOrder.id,item_name:i.name,category:i.category,quantity:i.quantity,price:Number(i.price),note:i.note||null}))); await dbPatch(`orders?id=eq.${editOrder.id}`,{total}); await load();showToast("✓ Order updated!");setScreen(null);setEditOrder(null);setSelectedOrder(null);setTab("orders"); }catch(e){showToast("Failed to update");} };
   const addItemsOrderRef = useRef(null);
